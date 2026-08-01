@@ -1,4 +1,4 @@
-# herdr-gekiatu-plugin 🎰
+# herdr-gekiatsu-plugin 🎰
 
 **Claude Code の使用回数が分かる herdr プラグイン** ——ただし見た目はパチスロ台。
 
