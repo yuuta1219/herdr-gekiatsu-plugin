@@ -325,8 +325,7 @@ def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="res
         _prev["balls"] = balls
     # モニター2行 + リール行: 使う色に値を入れ、色が変わったときだけ旧色をクリア
     if blank:
-        reel_text = boxed("")
-        scr1 = scr2 = ""
+        reel_text = boxed("")  # リールだけ暗転。モニターは渡された内容をそのまま出す
     else:
         reel_text = boxed(" ".join(f"│{FW_DIGITS[d]}│" for d in reels))
     for name, text, col in (("s1", boxed(scr1), scr_col),
@@ -531,6 +530,25 @@ def play_777_sound():
                          start_new_session=True)
 
 
+PUCHUN_FRAMES = [
+    # (モニター1行目, 2行目, 表示秒) — ブラウン管の電源が落ちるアレ。合計約2秒
+    ("▓▒░▓▒░▓▒░▓▒░▓", "░▒▓░▒▓░▒▓░▒▓░", 0.15),  # ノイズ
+    ("░▓▒░▓▒░▓▒░▓▒░", "▒░▓▒░▓▒░▓▒░▓▒", 0.15),
+    ("━━━━━━━━━━━━━", "", 0.20),                # 白い線に収縮
+    ("━━━━━━━", "", 0.15),
+    ("━━━", "", 0.15),
+    ("・", "", 0.25),                            # 中心の点
+    ("", "", 0.95),                              # 完全暗転
+]
+
+
+def puchun(pane, decoy, stats):
+    """ぷちゅん演出: リール暗転＋モニターでブラウン管オフのアニメ。"""
+    for s1, s2, dur in PUCHUN_FRAMES:
+        render(pane, decoy, s1, s2, stats, blank=True, scr_col="w")
+        time.sleep(dur)
+
+
 def promote_sequence(pane, decoy, stats):
     """RUSH当選(99%側)の演出: 別の揃い → ぷちゅん(暗転) → 777昇格 → +1500玉。"""
     d3 = FW_DIGITS[decoy[0]] * 3
@@ -538,8 +556,7 @@ def promote_sequence(pane, decoy, stats):
     render(pane, decoy, f"＼{d3}／", "そろった！？", stats, reel_col=cols, scr_col=sc)
     time.sleep(0.9)
     # ぷちゅん（昇格では777.mp3は鳴らさない。音は直777の1%だけの特権）
-    render(pane, decoy, "", "", stats, blank=True, scr_col="w")
-    time.sleep(0.8)
+    puchun(pane, decoy, stats)
     final = [7, 7, 7]
     for f in range(6):
         render(pane, final, ["＼昇格！！／", "★７７７★"][f % 2],
