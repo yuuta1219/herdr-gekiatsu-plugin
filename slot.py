@@ -6,7 +6,9 @@ when a Claude pane enters "working" (= you sent a message); the reels land
 the moment the answer finishes. Spin count = your Claude Code usage for the
 day (resets at 10:00 JST, like a pachinko parlor opening).
 
-Odds: jackpot 1/99. Of jackpots: 777 = 1%, odd triple = 49%, even = 50%.
+Odds scale with your Claude session usage (use Claude more, win more):
+<=50% -> 1/99, then -10 per 10% band, >=90% -> 1/10.
+Of jackpots: 777 = 1%, odd triple = 49%, even = 50%.
 
 Rendering uses the same pseudo-agent trick as claude-flex: a mini-workspace
 pane is reported as agent "slot", and pane tokens carry the cabinet rows
@@ -34,7 +36,10 @@ PLUGIN_ID = "miko.claude-slot"
 SOURCE = f"plugin:{PLUGIN_ID}"
 AGENT_ID = "slot"
 WS_LABEL = "🎰 スロット"
-JACKPOT_P = 1 / 99  # 大当たり確率
+# 大当たり確率はセッション使用率に連動（Claudeをいっぱい使うほど甘くなる仕様）
+# 〜50%: 1/99 → 以降10%ごとに分母が10ずつ減り、90%以上で 1/10
+BASE_DENOM = 99
+HOT_DENOM = 10      # 使用率90%以上の激甘モード
 P_777 = 0.01        # 大当たりの内訳: 777 = 1%
 P_ODD = 0.49        # 〃 奇数揃い(1,3,5,9) = 49%（残り50%が偶数揃い 0,2,4,6,8）
 MAINT_INTERVAL_S = 60
@@ -287,6 +292,80 @@ def setup_block(workspaces=None):
 
 FORCE_FILE = os.path.join(STATE_DIR, "force.json")
 
+# ---------- セッション使用率（大当たり確率の変動用） ----------
+# 姉妹プラグイン claude-usage(miko.claude-flex) が5分毎に書くキャッシュを優先して読む。
+# 無い/古い場合は単体で Anthropic の usage エンドポイントから直接取得する。
+FLEX_CACHE = os.path.expanduser("~/.local/state/herdr/plugins/miko.claude-flex/usage.json")
+OWN_USAGE_CACHE = os.path.join(STATE_DIR, "usage.json")
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+USAGE_MAX_AGE_S = 600
+
+
+def _read_usage_cache(path):
+    try:
+        if time.time() - os.path.getmtime(path) > USAGE_MAX_AGE_S:
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["session"]["pct"]
+    except Exception:
+        return None
+
+
+def _fetch_usage_direct():
+    import urllib.request
+    creds = None
+    try:  # macOS: Claude Code の OAuth 認証情報は Keychain に居る
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            creds = json.loads(out.stdout)
+    except Exception:
+        pass
+    if creds is None:
+        try:  # Linux / fallback
+            with open(os.path.expanduser("~/.claude/.credentials.json"), encoding="utf-8") as f:
+                creds = json.load(f)
+        except Exception:
+            return None
+    token = (creds.get("claudeAiOauth") or {}).get("accessToken")
+    if not token:
+        return None
+    req = urllib.request.Request(USAGE_URL, headers={
+        "Authorization": f"Bearer {token}",
+        "anthropic-beta": "oauth-2025-04-20",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.load(resp)
+        pct = (data.get("five_hour") or {}).get("utilization")
+        if pct is None:
+            return None
+        cached = {"session": {"pct": round(pct)}, "week": {"pct": None}}
+        with open(OWN_USAGE_CACHE, "w") as f:
+            json.dump(cached, f)
+        return round(pct)
+    except Exception:
+        return None
+
+
+def session_pct():
+    """セッション使用率(%)。姉妹プラグインのキャッシュ → 自前キャッシュ → 直接取得の順。"""
+    for path in (FLEX_CACHE, OWN_USAGE_CACHE):
+        pct = _read_usage_cache(path)
+        if pct is not None:
+            return pct
+    return _fetch_usage_direct()
+
+
+def jackpot_denom(pct):
+    """使用率→確率分母: 〜50%=99, 以降10%毎に-10, 90%以上=10"""
+    if pct is None or pct < 50:
+        return BASE_DENOM
+    if pct >= 90:
+        return HOT_DENOM
+    return BASE_DENOM - 10 * ((int(pct) - 40) // 10)
+
 
 def pick_outcome():
     # 仕込み: force.json に [7,7,7] などを置くと次の1回だけその出目で着地する
@@ -299,7 +378,7 @@ def pick_outcome():
             return forced
     except Exception:
         pass
-    if random.random() < JACKPOT_P:
+    if random.random() < 1 / jackpot_denom(session_pct()):
         r = random.random()
         if r < P_777:
             d = 7
