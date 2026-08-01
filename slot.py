@@ -592,7 +592,8 @@ def land_spin(pane):
         fever_write("reach", final)
         herdr_cli("plugin", "pane", "open",
                   "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
-    locks = [2, 5, 10 if reach else 7]  # 待ち中に散々回ったので停止は短め
+    # 0.25s/フレーム × 2フレーム間隔 = ボタンは0.5秒ずつ順に止まる（見やすさ重視）
+    locks = [2, 4, 10 if reach else 6]
     f = 0
     while f <= locks[-1]:
         locked = [f >= lk for lk in locks]
@@ -607,7 +608,7 @@ def land_spin(pane):
             s1 = "とまるにぇ！"
             s2 = SPIN_WAVE[f % len(SPIN_WAVE)]
             sc = "w"
-            delay = 0.15
+            delay = 0.25
         render(pane, cur, s1, s2, stats, locked, scr_col=sc)
         time.sleep(delay)
         f += 1
