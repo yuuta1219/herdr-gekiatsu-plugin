@@ -474,10 +474,12 @@ def land_spin(pane):
     final = pick_outcome()
     reach = final[0] == final[1]
     if final == [7, 7, 7]:
-        # 777確定のときだけ: リーチが走るこのスピンの冒頭で FEVER ポップアップを開く
+        # 777確定のときだけ: リーチが走るこのスピンの冒頭で FEVER ポップアップを開く。
+        # --no-focus 必須: フォーカスを奪うと、直後に回答完了する claude が
+        # 「非フォーカスで finished」扱いになって herdr の通知が鳴ってしまう
         fever_write("reach", final)
         herdr_cli("plugin", "pane", "open",
-                  "--plugin", PLUGIN_ID, "--entrypoint", "fever")
+                  "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
     locks = [2, 5, 10 if reach else 7]  # 待ち中に散々回ったので停止は短め
     f = 0
     while f <= locks[-1]:
