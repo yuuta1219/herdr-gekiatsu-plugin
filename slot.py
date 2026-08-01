@@ -307,10 +307,10 @@ def paint_statics(pane):
 
 
 def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="rest",
-           reel_col=None, scr_col="w", blank=False):
+           reel_col=None, scr_col="w", blank=False, extra_ops=None):
     """reel_col: リール行の色キー（省略時は偶奇多数決）。
     scr_col: モニター2行の色キー。色はトークンの出し分けで実現する。
-    blank=True で暗転（ぷちゅん演出: リールもモニターも空白）。"""
+    blank=True でリール暗転（ぷちゅん演出用）。extra_ops は追加トークン操作。"""
     if reel_col is None:
         reel_col = row_color(reels)
     marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
@@ -335,6 +335,8 @@ def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="res
             ops.append(("c", f"{name}_{_prev[name]}"))
         ops.append(("t", f"{name}_{col}", text))
         _prev[name] = col
+    if extra_ops:
+        ops += extra_ops
     report_tokens(pane, ops)
 
 
@@ -531,22 +533,25 @@ def play_777_sound():
 
 
 PUCHUN_FRAMES = [
-    # (モニター1行目, 2行目, 表示秒) — ブラウン管の電源が落ちるアレ。合計約2秒
-    ("▓▒░▓▒░▓▒░▓▒░▓", "░▒▓░▒▓░▒▓░▒▓░", 0.15),  # ノイズ
-    ("░▓▒░▓▒░▓▒░▓▒░", "▒░▓▒░▓▒░▓▒░▓▒", 0.15),
-    ("━━━━━━━━━━━━━", "", 0.20),                # 白い線に収縮
-    ("━━━━━━━", "", 0.15),
-    ("━━━", "", 0.15),
-    ("・", "", 0.25),                            # 中心の点
-    ("", "", 0.95),                              # 完全暗転
+    # (モニター1行目, 2行目=画面中央, 3行目=仕切り線の位置, 表示秒) 合計約2秒
+    ("▓▒░▓▒░▓▒░▓▒░▓", "░▒▓░▒▓░▒▓░▒▓░", "▒░▓▒░▓▒░▓▒░▓▒", 0.15),  # ノイズ
+    ("░▓▒░▓▒░▓▒░▓▒░", "▒░▓▒░▓▒░▓▒░▓▒", "▓▒░▓▒░▓▒░▓▒░▓", 0.15),
+    ("", "━━━━━━━━━━━━━", "", 0.20),   # 中央の行に白い線が収縮
+    ("", "━━━━━━━", "", 0.15),
+    ("", "━━━", "", 0.15),
+    ("", "・", "", 0.25),               # 中心の点
+    ("", "", "", 0.95),                 # 完全暗転
 ]
 
 
 def puchun(pane, decoy, stats):
-    """ぷちゅん演出: リール暗転＋モニターでブラウン管オフのアニメ。"""
-    for s1, s2, dur in PUCHUN_FRAMES:
-        render(pane, decoy, s1, s2, stats, blank=True, scr_col="w")
+    """ぷちゅん演出: リール暗転＋モニター〜仕切り線の3行をブラウン管に見立て、
+    中央の行(scr2)に向かって画面が収縮して消える。終わったら仕切り線を戻す。"""
+    for s1, s2, s3, dur in PUCHUN_FRAMES:
+        render(pane, decoy, s1, s2, stats, blank=True, scr_col="w",
+               extra_ops=[("t", "s_sep2", boxed(s3))])
         time.sleep(dur)
+    report_tokens(pane, [("t", "s_sep2", C_SEP2)])  # 仕切り線を復元
 
 
 def promote_sequence(pane, decoy, stats):
