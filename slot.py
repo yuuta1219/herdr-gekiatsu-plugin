@@ -437,11 +437,26 @@ def miss_reels():
 # リーチ演出の振り分け:
 #   blackout = 消灯予告（統計行が消える） / hasami = ハサミ押し（右→左→中央）
 #   reverse  = 逆押し（右→中央→左） / zenkaiten = 全回転（777専用）
-# 当たり時は特殊3種に各30%（通常リーチ当たり10%）。ハズレ側は信頼度が
-# ちょうど50%になる量だけ特殊リーチを混ぜる（q = 0.3/(分母-1)）。
-# → 特殊演出の信頼度は確率変動(使用率連動)後もつねに約50%を維持する
+# 当たり時は特殊3種に各30%（通常リーチ当たり10%）。ハズレ側の混入量は
+# 「消灯・ハサミ=信頼度指定」「逆押し=占有率指定」から逆算する。
+# → 確率変動(使用率連動)後も特性が自動で維持される
 HIT_PATTERNS = ["normal", "blackout", "hasami", "reverse"]
 HIT_PATTERN_W = [0.10, 0.30, 0.30, 0.30]
+CONF_BLACKOUT = 0.50   # 消灯予告の信頼度
+CONF_HASAMI = 0.80     # ハサミ押しの信頼度（激アツ枠）
+OCC_REVERSE = 0.30     # 逆押しのリーチ占有率（頻出の煽り枠、信頼度は成り行き）
+
+
+def _pattern_qs(denom):
+    """ハズレ1回あたりの特殊リーチ混入確率 (消灯, ハサミ, 逆押し) を逆算する。"""
+    r = 1.0 / denom
+    m = 1.0 - r
+    q_blk = r * 0.30 * (1 - CONF_BLACKOUT) / (CONF_BLACKOUT * m)
+    q_has = r * 0.30 * (1 - CONF_HASAMI) / (CONF_HASAMI * m)
+    # 逆押し: リーチ全体に占める割合が OCC_REVERSE になるように解く
+    t0 = r + m * (REACH_P + q_blk + q_has)
+    x = max(0.0, (OCC_REVERSE * t0 - r * 0.30) / (1 - OCC_REVERSE))
+    return q_blk, q_has, x / m
 
 
 def _miss_shape(pattern):
@@ -486,11 +501,13 @@ def decide(rush=False):
         if d == 7:
             return [7, 7, 7], "zenkaiten"
         return [d, d, d], random.choices(HIT_PATTERNS, HIT_PATTERN_W)[0]
-    # ハズレ側の特殊リーチ: 各 q で発生（信頼度50%になる調整量）
-    q = 0.3 / max(1, denom - 1)
+    # ハズレ側の特殊リーチ: 信頼度/占有率ターゲットから逆算した量だけ混入
+    q_blk, q_has, q_rev = _pattern_qs(denom)
     r = random.random()
-    for i, pattern in enumerate(("blackout", "hasami", "reverse")):
-        if r < (i + 1) * q:
+    cum = 0.0
+    for pattern, q in (("blackout", q_blk), ("hasami", q_has), ("reverse", q_rev)):
+        cum += q
+        if r < cum:
             return _miss_shape(pattern), pattern
     return miss_reels(), "normal"
 
