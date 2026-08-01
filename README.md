@@ -63,7 +63,7 @@ Claude にメッセージを送るたびレバーが引かれ、Claude が考え
 ## インストール
 
 ```sh
-herdr plugin install yuuta1219/herdr-pachisuro-plugin --yes
+herdr plugin install yuuta1219/herdr-gekiatsu-plugin --yes
 ```
 
 `~/.config/herdr/config.toml` に以下を追加：
