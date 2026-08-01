@@ -442,9 +442,9 @@ def miss_reels():
 # → 確率変動(使用率連動)後も特性が自動で維持される
 HIT_PATTERNS = ["normal", "blackout", "hasami", "reverse"]
 HIT_PATTERN_W = [0.10, 0.30, 0.30, 0.30]
-CONF_BLACKOUT = 0.50   # 消灯予告の信頼度
-CONF_HASAMI = 0.80     # ハサミ押しの信頼度（激アツ枠）
-OCC_REVERSE = 0.30     # 逆押しのリーチ占有率（頻出の煽り枠、信頼度は成り行き）
+CONF_BLACKOUT = 0.50   # 消灯予告の信頼度（信頼度指定型）
+OCC_HASAMI = 0.10      # ハサミ押しのリーチ占有率（占有指定型、信頼度は成り行き）
+OCC_REVERSE = 0.30     # 逆押しのリーチ占有率（占有指定型、信頼度は成り行き）
 
 
 def _pattern_qs(denom):
@@ -452,11 +452,13 @@ def _pattern_qs(denom):
     r = 1.0 / denom
     m = 1.0 - r
     q_blk = r * 0.30 * (1 - CONF_BLACKOUT) / (CONF_BLACKOUT * m)
-    q_has = r * 0.30 * (1 - CONF_HASAMI) / (CONF_HASAMI * m)
-    # 逆押し: リーチ全体に占める割合が OCC_REVERSE になるように解く
-    t0 = r + m * (REACH_P + q_blk + q_has)
-    x = max(0.0, (OCC_REVERSE * t0 - r * 0.30) / (1 - OCC_REVERSE))
-    return q_blk, q_has, x / m
+    # ハサミ・逆押し: リーチ全体に占める割合がそれぞれの OCC_* になるように連立で解く
+    t0 = r + m * (REACH_P + q_blk)
+    occ_sum = OCC_HASAMI + OCC_REVERSE
+    total = (t0 - r * 0.60) / (1 - occ_sum)  # 0.60 = 両者のヒット側重み(0.30+0.30)
+    x_has = max(0.0, OCC_HASAMI * total - r * 0.30)
+    x_rev = max(0.0, OCC_REVERSE * total - r * 0.30)
+    return q_blk, x_has / m, x_rev / m
 
 
 def _miss_shape(pattern):
