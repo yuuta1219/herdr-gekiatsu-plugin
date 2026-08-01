@@ -518,7 +518,7 @@ def lever_pull(pane, stats):
 def spin_frame(pane, stats, f):
     """回答待ちのあいだ回り続けるフレーム（ゆっくりめ）。"""
     cur = [random.randint(0, 9) for _ in range(3)]
-    s3 = "当選率８０％" if stats.get("rush") else SPIN_WAVE[(f + 2) % len(SPIN_WAVE)]
+    s3 = "継続率８０％" if stats.get("rush") else SPIN_WAVE[(f + 2) % len(SPIN_WAVE)]
     render(pane, cur, "かんがえ中…", SPIN_WAVE[f % len(SPIN_WAVE)], stats, [False] * 3,
            scr3=s3)
 
@@ -681,7 +681,7 @@ def ambient_frame(pane, stats, f):
         streak = stats.get("rush_streak", 0)
         s1 = ["ＲＵＳＨ継続中", "≫ＲＵＳＨ中≪"][f % 2]
         s2 = f"{streak}連目"
-        s3 = [f"＼{d3}／", "当選率８０％"][(f // 2) % 2]
+        s3 = [f"＼{d3}／", "継続率８０％"][(f // 2) % 2]
         render(pane, last, s1, s2, stats, reel_col="y" if last[0] == 7 else "r",
                scr_col=["r", "y"][f % 2], scr3=s3)
         return
