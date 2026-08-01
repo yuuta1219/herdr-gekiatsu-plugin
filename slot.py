@@ -277,6 +277,36 @@ REACH_LINE_TIERS = [
 ]
 REACH_LINE_FILLERS = ["ドキドキ…", "くるかにぇ？", "むむむ…"]
 
+# ---- 予告演出（回転開始〜停止前に挟まる。占有率で信頼度が生まれる） ----
+REVIVE_P = 0.05  # 当たり(777以外)のうち復活演出(一回ハズレて蘇る)になる割合
+
+
+def _w_choice(hit, hit_table, miss_table):
+    """(値, 重み) テーブルから抽選。当たり/ハズレで別テーブル。"""
+    table = hit_table if hit else miss_table
+    vals = [v for v, _ in table]
+    weights = [w for _, w in table]
+    return random.choices(vals, weights)[0]
+
+
+def _fit(s):
+    """半角スペースで幅ちょうどINNERに右詰めパディング（boxedで左寄せ表示になる）。"""
+    while dwidth(s) > INNER:
+        s = s[:-1]
+    return s + " " * (INNER - dwidth(s))
+
+
+def _ticker(text, f):
+    """右から左に流れるニュース速報風スクロール。"""
+    s = text + "　　　"
+    k = f % len(s)
+    return _fit(s[k:] + s[:k])
+
+
+def _at_offset(text, off):
+    """左からoffだけずらして置く（リーチ大文字フロー用）。"""
+    return _fit(" " * max(0, off) + text)
+
 
 def _tier_pick(tiers, hit, denom):
     """信頼度テーブルから1つ抽選。当たり時は選択率どおり、ハズレ時は
@@ -532,15 +562,8 @@ def _hit_digit():
     return random.choice([0, 2, 4, 6, 8])
 
 
-def decide(rush=False):
-    """出目と演出パターンをまとめて抽選する。returns (final, pattern)"""
-    forced = consume_force()
-    if forced is not None:
-        if forced == [7, 7, 7]:
-            return forced, "zenkaiten"
-        if forced[0] == forced[1] == forced[2]:
-            return forced, random.choices(HIT_PATTERNS, HIT_PATTERN_W)[0]
-        return forced, "normal"
+def decide_lottery(rush=False):
+    """出目と演出パターンを抽選する（仕込み force は land 側で処理）。"""
     if rush:
         if random.random() < RUSH_WIN_P:
             if random.random() < RUSH_DIRECT777_P:
@@ -725,11 +748,92 @@ def zenkaiten_sequence(pane, stats):
               "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
 
 
+def pseudo_rounds(pane, stats, n):
+    """擬似連: 一回ハズレ目で止まる→「もう１回転！」→再始動 ×n。回数が多いほどアツい。"""
+    for i in range(n):
+        decoy = [random.randint(0, 9) for _ in range(3)]
+        if decoy[0] == decoy[1]:
+            decoy[1] = (decoy[1] + 1) % 10  # 擬似連の止まり目はリーチにしない
+        for f in range(4):
+            locked = [f >= 1, f >= 2, f >= 3]
+            cur = [decoy[k] if locked[k] else random.randint(0, 9) for k in range(3)]
+            render(pane, cur, "とまるにぇ！", SPIN_WAVE[f % len(SPIN_WAVE)], stats, locked)
+            time.sleep(0.2)
+        render(pane, decoy, "もう１回転！", f"擬似 ×{i + 2}", stats,
+               scr_col="y", scr3="＞＞＞＞＞")
+        time.sleep(0.9)
+        lever_pull(pane, stats)
+
+
+def play_announcement(pane, stats, ann, step_level):
+    """回転中の予告演出（リールは回りっぱなし）。"""
+    def frame(s1, s2, s3, sc, dur, rc=None):
+        cur = [random.randint(0, 9) for _ in range(3)]
+        render(pane, cur, s1, s2, stats, [False] * 3, scr_col=sc, scr3=s3, reel_col=rc)
+        time.sleep(dur)
+    if ann == "step":
+        # ステップアップ: ？→！？→！！！ 進むほどアツい
+        steps = [("？", "w"), ("！？", "p"), ("！！！", "r")][:step_level]
+        for s, col in steps:
+            for _ in range(2):
+                frame("", s, "", col, 0.35)
+    elif ann == "count":
+        # カウントダウン: ３→２→１ → リーチ発展確定
+        for c in ("３", "２", "１"):
+            frame("", c, "", "y", 0.55)
+    elif ann == "mure":
+        # 群予告: にぇが画面を埋め尽くす（激アツ）
+        nye = "にぇ" * 7
+        for f in range(5):
+            frame(_ticker(nye, f * 3), _ticker(nye, f * 3 + 2), _ticker(nye, f * 3 + 4),
+                  ["r", "y"][f % 2], 0.3)
+    elif ann == "logo":
+        # ロゴ落下: 激→ア→ツ が上から降って積み上がる
+        seq = [("ツ", "", ""), ("", "ツ", ""), ("", "", "ツ"),
+               ("ア", "", "ツ"), ("", "ア", "ツ"),
+               ("激", "ア", "ツ")]
+        for s1, s2, s3 in seq:
+            frame(s1, s2, s3, "r", 0.3)
+        frame("激", "ア", "ツ", "y", 0.6)
+
+
+def reach_flow(pane, cur, locked, stats):
+    """2つ目停止でリーチ確定した瞬間、「★リーチ★」が3行を左から右へ流れる。"""
+    for off in range(-4, 18, 2):
+        rows = [_at_offset("★リーチ★", off - lag) for lag in (0, 2, 4)]
+        render(pane, cur, rows[0], rows[1], stats, locked, scr_col="r", scr3=rows[2])
+        time.sleep(0.13)
+
+
+def revival_twist(pane, final, stats):
+    """復活演出: 一回ハズレて見せてから暗転→「まだだにぇ！」→本当の出目に蘇る。"""
+    for s1, s2, s3, dur in PUCHUN_FRAMES[2:]:  # 白線収縮〜暗転を再利用
+        render(pane, final, s1, s2, stats, blank=True, scr_col="w", scr3=s3)
+        time.sleep(dur)
+    for f in range(4):
+        render(pane, final, "まだだにぇ！", "！！！！", stats,
+               reel_col="y", scr_col=RAINBOW_CYCLE[f % 5], scr3="復活！！")
+        time.sleep(0.4)
+
+
 def land_spin(pane):
     """回答完了（=ユーザー待ち）の瞬間に呼ばれて、リールを順に止める。"""
     stats = stats_read()
     rush = bool(stats.get("rush"))
-    final, pattern = decide(rush)
+    # 出目の決定: 仕込み > 保留（前回転で先行抽選済み） > その場で抽選
+    held = stats.pop("held", None)
+    forced = consume_force()
+    if forced is not None:
+        if forced == [7, 7, 7]:
+            final, pattern = forced, "zenkaiten"
+        elif forced[0] == forced[1] == forced[2]:
+            final, pattern = forced, random.choices(HIT_PATTERNS, HIT_PATTERN_W)[0]
+        else:
+            final, pattern = forced, "normal"
+    elif held:
+        final, pattern = held["final"], held["pattern"]
+    else:
+        final, pattern = decide_lottery(rush)
     hit = final[0] == final[1] == final[2]
     is_777 = final == [7, 7, 7]
     promote = rush and hit and not is_777  # RUSHの昇格演出（最終的に777表示になる）
@@ -737,7 +841,12 @@ def land_spin(pane):
     teased = hit or pattern in ("blackout", "hasami", "reverse") or final[0] == final[1]
     # リーチ中の信頼度示唆（文字色とセリフ）を抽選。RUSHのハズレは無示唆で散る
     denom = jackpot_denom(session_pct())
-    if hit or not rush:
+    revive = hit and not is_777 and random.random() < REVIVE_P  # 復活演出（一回死ぬ）
+    if revive:
+        # ハズレを装うので示唆もハズレ側の出現率でロール（本気で騙しにいく）
+        v_color = _tier_pick(REACH_COLOR_TIERS, False, denom)
+        v_line = _tier_pick(REACH_LINE_TIERS, False, denom)
+    elif hit or not rush:
         v_color = _tier_pick(REACH_COLOR_TIERS, hit, denom)
         v_line = _tier_pick(REACH_LINE_TIERS, hit, denom)
     else:
@@ -746,30 +855,57 @@ def land_spin(pane):
         # 音とポップアップは全回転シーケンス内で処理される
         zenkaiten_sequence(pane, stats)
     else:
-        # 0.25s/フレーム × 2フレーム間隔 = ボタンは0.5秒ずつ順に止まる
-        # リーチ時は最後の1リールを約3秒じらす（示唆をじっくり見せる）
+        # ---- 予告フェーズ: 擬似連 → 回転中予告（どちらも占有率で信頼度が生まれる） ----
+        pseudo_n = _w_choice(hit, [(0, .55), (1, .20), (2, .15), (3, .10)],
+                                  [(0, .96), (1, .03), (2, .009), (3, .001)])
+        ann = _w_choice(hit, [(None, .25), ("step", .25), ("count", .15),
+                              ("mure", .15), ("logo", .20)],
+                             [(None, .93), ("step", .05), ("count", .015),
+                              ("mure", .0006), ("logo", .0015)])
+        teased_disp = True if revive else teased
+        if ann == "count" and not teased_disp:
+            ann = None  # カウントダウンはリーチ発展確定の予告
+        step_level = 0
+        if ann == "step":
+            step_level = _w_choice(hit, [(2, .4), (3, .6)], [(1, .7), (2, .25), (3, .05)])
+        if pseudo_n:
+            pseudo_rounds(pane, stats, pseudo_n)
+        if ann:
+            play_announcement(pane, stats, ann, step_level)
+        # ---- 停止フェーズ ----
+        disp = final
+        if revive:
+            d = final[0]
+            e = random.choice([x for x in range(10) if x != d])
+            disp = [d, d, e]  # 一旦リーチハズレの目で止めて見せる
         if pattern == "hasami":
             lock_at = [4, 15, 2]   # ハサミ押し: 右→左→中央
         elif pattern == "reverse":
             lock_at = [15, 4, 2]   # 逆押し: 右→中央→左
         else:
-            lock_at = [2, 4, 15 if teased else 6]
+            lock_at = [2, 4, 15 if teased_disp else 6]
+        line_text = v_line if v_line else random.choice(REACH_LINE_FILLERS)
+        flowed = False
         f = 0
         while f <= max(lock_at):
             locked = [f >= lock_at[i] for i in range(3)]
-            cur = [final[i] if locked[i] else random.randint(0, 9) for i in range(3)]
+            cur = [disp[i] if locked[i] else random.randint(0, 9) for i in range(3)]
             # 残り1リールで、止まっている2つが同じ数字ならリーチ演出
-            shown = [final[i] for i in range(3) if locked[i]]
+            shown = [disp[i] for i in range(3) if locked[i]]
             in_tease = locked.count(False) == 1 and len(shown) == 2 and shown[0] == shown[1]
+            if in_tease and not flowed:
+                # リーチ成立の瞬間: ★リーチ★が3行を左から右へ流れてから発展
+                reach_flow(pane, cur, locked, stats)
+                flowed = True
             if in_tease:
-                # 上段=セリフ示唆 / 中段=リーチ文字（色で示唆） / 下段=あおり
+                # 上段=セリフ示唆(スクロール) / 中段=リーチ文字（色で示唆） / 下段=あおり
                 if v_line == "おめでとう":
                     line_col = RAINBOW_CYCLE[f % 5]  # 確定セリフは虹色で切り替わる
                 elif v_line == "激アツ！":
                     line_col = "r"
                 else:
                     line_col = "w"
-                s1 = v_line if v_line else REACH_LINE_FILLERS[(f // 2) % len(REACH_LINE_FILLERS)]
+                s1 = _ticker(line_text, f)
                 s2 = REACH_S1[f % len(REACH_S1)]
                 s3 = REACH_S2[(f // 2) % len(REACH_S2)]
                 sc = (line_col, v_color or "w", "w")
@@ -784,6 +920,11 @@ def land_spin(pane):
                    marquee_off=(pattern == "blackout" and in_tease))
             time.sleep(delay)
             f += 1
+        if revive:
+            # 一回死んだフリ → 暗転 → 「まだだにぇ！」で本当の出目に蘇る
+            render(pane, disp, "（´・ω・｀）", "ざんねん…", stats, scr3="つぎいくにぇ")
+            time.sleep(1.3)
+            revival_twist(pane, final, stats)
     stats["spins"] += 1
     if hit:
         stats["hits"] += 1
@@ -839,6 +980,14 @@ def land_spin(pane):
             stats_write(stats)
             render(pane, final, "（´・ω・｀）", "ざんねん…", stats, scr3="つぎいくにぇ")
             time.sleep(2.0)
+    # ---- 保留変化用: 次回転の出目を先行抽選しておく（アツければ待機中に告知） ----
+    stats = stats_read()
+    if not os.path.exists(FORCE_FILE):
+        nf, np_ = decide_lottery(bool(stats.get("rush")))
+        nh = nf[0] == nf[1] == nf[2]
+        hint = (nh and random.random() < 0.4) or ((not nh) and random.random() < 0.005)
+        stats["held"] = {"final": nf, "pattern": np_, "hint": hint}
+        stats_write(stats)
 
 
 def ambient_frame(pane, stats, f):
@@ -875,8 +1024,14 @@ def ambient_frame(pane, stats, f):
                    reel_col="b", scr_col=["b", "c"][f % 2], scr3=s3)
     else:
         s2 = ["めざせ７７７", SPIN_WAVE[f % len(SPIN_WAVE)]][f % 2]
-        s3 = ["１回転＝１送信", "回せば当たる…"][(f // 3) % 2]
-        render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3)
+        if stats.get("held", {}).get("hint"):
+            # 保留変化: 次の回転がアツいことを先に匂わせる（信頼度は高め）
+            s3 = ["次の回転…", "アツいかも！？"][(f // 2) % 2]
+            render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3,
+                   scr_col=("w", "w", "p"))
+        else:
+            s3 = ["１回転＝１送信", "回せば当たる…"][(f // 3) % 2]
+            render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3)
 
 
 def idle_paint(pane):
