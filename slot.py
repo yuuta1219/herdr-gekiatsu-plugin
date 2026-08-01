@@ -663,12 +663,12 @@ def land_spin(pane):
         elif reach:
             stats["last"] = final
             stats_write(stats)
-            render(pane, final, "おしい…！！", "つぎこそにぇ", stats)
+            render(pane, final, "（＞＿＜）", "おしい…！！", stats, scr3="つぎこそにぇ")
             time.sleep(2.0)  # 余韻を見せてから ambient に引き継ぐ
         else:
             stats["last"] = final
             stats_write(stats)
-            render(pane, final, "ざんねん…", "つぎいくにぇ", stats)
+            render(pane, final, "（´・ω・｀）", "ざんねん…", stats, scr3="つぎいくにぇ")
             time.sleep(2.0)
 
 
