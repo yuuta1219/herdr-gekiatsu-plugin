@@ -293,69 +293,21 @@ def setup_block(workspaces=None):
 FORCE_FILE = os.path.join(STATE_DIR, "force.json")
 
 # ---------- セッション使用率（大当たり確率の変動用） ----------
-# 姉妹プラグイン claude-usage(miko.claude-flex) が5分毎に書くキャッシュを優先して読む。
-# 無い/古い場合は単体で Anthropic の usage エンドポイントから直接取得する。
+# 確率変動は姉妹プラグイン claude-usage(miko.claude-flex) が入っている場合だけ有効。
+# その5分毎キャッシュを読むだけで、無ければ常に基本確率 1/99 で動く。
 FLEX_CACHE = os.path.expanduser("~/.local/state/herdr/plugins/miko.claude-flex/usage.json")
-OWN_USAGE_CACHE = os.path.join(STATE_DIR, "usage.json")
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 USAGE_MAX_AGE_S = 600
 
 
-def _read_usage_cache(path):
+def session_pct():
+    """セッション使用率(%)。姉妹プラグインのキャッシュ限定、無ければ None。"""
     try:
-        if time.time() - os.path.getmtime(path) > USAGE_MAX_AGE_S:
+        if time.time() - os.path.getmtime(FLEX_CACHE) > USAGE_MAX_AGE_S:
             return None
-        with open(path, encoding="utf-8") as f:
+        with open(FLEX_CACHE, encoding="utf-8") as f:
             return json.load(f)["session"]["pct"]
     except Exception:
         return None
-
-
-def _fetch_usage_direct():
-    import urllib.request
-    creds = None
-    try:  # macOS: Claude Code の OAuth 認証情報は Keychain に居る
-        out = subprocess.run(
-            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-            capture_output=True, text=True, timeout=5)
-        if out.returncode == 0 and out.stdout.strip():
-            creds = json.loads(out.stdout)
-    except Exception:
-        pass
-    if creds is None:
-        try:  # Linux / fallback
-            with open(os.path.expanduser("~/.claude/.credentials.json"), encoding="utf-8") as f:
-                creds = json.load(f)
-        except Exception:
-            return None
-    token = (creds.get("claudeAiOauth") or {}).get("accessToken")
-    if not token:
-        return None
-    req = urllib.request.Request(USAGE_URL, headers={
-        "Authorization": f"Bearer {token}",
-        "anthropic-beta": "oauth-2025-04-20",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.load(resp)
-        pct = (data.get("five_hour") or {}).get("utilization")
-        if pct is None:
-            return None
-        cached = {"session": {"pct": round(pct)}, "week": {"pct": None}}
-        with open(OWN_USAGE_CACHE, "w") as f:
-            json.dump(cached, f)
-        return round(pct)
-    except Exception:
-        return None
-
-
-def session_pct():
-    """セッション使用率(%)。姉妹プラグインのキャッシュ → 自前キャッシュ → 直接取得の順。"""
-    for path in (FLEX_CACHE, OWN_USAGE_CACHE):
-        pct = _read_usage_cache(path)
-        if pct is not None:
-            return pct
-    return _fetch_usage_direct()
 
 
 def jackpot_denom(pct):
@@ -539,7 +491,7 @@ def ambient_frame(pane, stats, f):
                    reel_col="b", scr_col=["b", "c"][f % 2])
     else:
         s2 = ["めざせ７７７", SPIN_WAVE[f % len(SPIN_WAVE)]][f % 2]
-        render(pane, last, "＊みこスロ＊", s2, stats)
+        render(pane, last, "＊くろスロ＊", s2, stats)
 
 
 def idle_paint(pane):
