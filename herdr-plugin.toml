@@ -1,4 +1,4 @@
-id = "miko.claude-slot"
+id = "gekiatsu.claude-slot"
 name = "Claude Slot"
 version = "1.0.0"
 min_herdr_version = "0.7.0"

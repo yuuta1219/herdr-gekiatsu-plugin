@@ -94,7 +94,7 @@ rows = [
 
 ```sh
 herdr server reload-config
-herdr plugin action invoke start --plugin miko.claude-slot
+herdr plugin action invoke start --plugin gekiatsu.claude-slot
 ```
 
 以降は herdr サーバー起動時に自動で立ち上がります。
@@ -103,13 +103,13 @@ herdr plugin action invoke start --plugin miko.claude-slot
 
 ```sh
 # 手動テストスピン（引く→回る→止まる）
-herdr plugin action invoke spin --plugin miko.claude-slot
+herdr plugin action invoke spin --plugin gekiatsu.claude-slot
 
 # 停止（筐体ワークスペースごと消える）
-herdr plugin action invoke stop --plugin miko.claude-slot
+herdr plugin action invoke stop --plugin gekiatsu.claude-slot
 ```
 
-デバッグ用に、状態ディレクトリ（`~/.local/state/herdr/plugins/miko.claude-slot/`）へ
+デバッグ用に、状態ディレクトリ（`~/.local/state/herdr/plugins/gekiatsu.claude-slot/`）へ
 `force.json` に `[7, 7, 7]` を書いておくと**次の1回だけ**その出目で着地します。
 
 ## 仕組み

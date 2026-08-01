@@ -32,7 +32,7 @@ import sys
 import threading
 import time
 
-PLUGIN_ID = "miko.claude-slot"
+PLUGIN_ID = "gekiatsu.claude-slot"
 SOURCE = f"plugin:{PLUGIN_ID}"
 AGENT_ID = "slot"
 WS_LABEL = "🎰 Claude"  # claude-usage と同居する共有ミニワークスペース（スペース1枠に統合）
@@ -47,7 +47,7 @@ MAINT_INTERVAL_S = 60
 
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
 # Fixed path on purpose: manual runs and herdr-hook runs must share one pidfile.
-STATE_DIR = os.path.expanduser("~/.local/state/herdr/plugins/miko.claude-slot")
+STATE_DIR = os.path.expanduser("~/.local/state/herdr/plugins/gekiatsu.claude-slot")
 SOCKET_PATH = os.environ.get("HERDR_SOCKET_PATH", "") or os.path.expanduser("~/.config/herdr/herdr.sock")
 PIDFILE = os.path.join(STATE_DIR, "daemon.pid")
 WS_ID_FILE = os.path.join(STATE_DIR, "workspace.id")
@@ -330,9 +330,9 @@ def setup_block(workspaces=None):
 FORCE_FILE = os.path.join(STATE_DIR, "force.json")
 
 # ---------- セッション使用率（大当たり確率の変動用） ----------
-# 確率変動は姉妹プラグイン claude-usage(miko.claude-flex) が入っている場合だけ有効。
+# 確率変動は姉妹プラグイン claude-usage(gekiatsu.claude-flex) が入っている場合だけ有効。
 # その5分毎キャッシュを読むだけで、無ければ常に基本確率 1/99 で動く。
-FLEX_CACHE = os.path.expanduser("~/.local/state/herdr/plugins/miko.claude-flex/usage.json")
+FLEX_CACHE = os.path.expanduser("~/.local/state/herdr/plugins/gekiatsu.claude-flex/usage.json")
 USAGE_MAX_AGE_S = 600
 
 
