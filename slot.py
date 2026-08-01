@@ -639,7 +639,7 @@ def land_spin(pane):
             stats_write(stats)
             render(pane, final, "ＲＵＳＨ終了…", f"{ended}連でした", stats,
                    scr3="おつかれにぇ")
-            time.sleep(2.0)
+            time.sleep(3.0)
     else:
         if hit:
             d = final[0]
