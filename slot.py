@@ -254,9 +254,55 @@ REEL_BOT = boxed(" ".join(["└──┘"] * 3))
 # 「同じ行に色違いトークンを並べて、使う色にだけ値を入れる」ことで動的に見せる。
 # 注意: 同じ行に複数トークンが同時に値を持つと「・」区切りで連結されてズレるので、
 # 各行とも常に1トークンだけに値を入れる（リールも行単位で1色）
-PALETTE = ["b", "r", "y", "c", "m"]  # 青 / ピンク赤 / 黄 / 水色 / 紫
-SCR_PALETTE = ["w"] + PALETTE
+PALETTE = ["b", "r", "y", "c", "m"]  # 青 / 赤 / 金黄 / 水色 / 紫
+SCR_PALETTE = ["w"] + PALETTE + ["g", "p"]  # モニターは 緑 / ピンク も使える（信頼度示唆用）
 RAINBOW_CYCLE = ["y", "c", "m", "r", "b"]  # 777 演出の色サイクル
+
+# ---- リーチ中の信頼度示唆（文字色とセリフ、それぞれ独立に抽選） ----
+# (キー, 信頼度, 当たり時の選択率)。ハズレ側の出現量は信頼度から逆算するので、
+# 「この色/セリフが出たときに当たる確率」がそのまま信頼度になる
+REACH_COLOR_TIERS = [
+    ("y", 1.00, 0.30),   # 金 = 確定
+    ("r", 0.90, 0.50),   # 赤 = 大チャンス
+    ("p", 0.10, 0.15),   # ピンク
+    ("g", 0.015, 0.03),  # 緑 = ほぼ煽り
+    ("b", 0.005, 0.02),  # 青 = 出たら逆にレアなハズレ屋
+]
+REACH_LINE_TIERS = [
+    ("おめでとう", 1.00, 0.05),    # 確定。虹色サイクルで表示される
+    ("仕事してる？", 0.99, 0.30),
+    ("激アツ！", 0.80, 0.10),
+    ("ひまなのかにぇ", 0.10, 0.25),
+    ("いまのやつ", 0.01, 0.05),
+]
+REACH_LINE_FILLERS = ["ドキドキ…", "くるかにぇ？", "むむむ…"]
+
+
+def _tier_pick(tiers, hit, denom):
+    """信頼度テーブルから1つ抽選。当たり時は選択率どおり、ハズレ時は
+    信頼度が成立する量だけ出す。何も選ばれなければ None（無示唆=白）。"""
+    if hit:
+        r = random.random()
+        cum = 0.0
+        for key, _c, h in tiers:
+            cum += h
+            if r < cum:
+                return key
+        return None
+    hr = 1.0 / denom
+    m = 1.0 - hr
+    q_blk, q_has, q_rev = _pattern_qs(denom)
+    p_mr = m * (REACH_P + q_blk + q_has + q_rev)  # ハズレリーチの発生率
+    if p_mr <= 0:
+        return None
+    r = random.random()
+    cum = 0.0
+    for key, c, h in tiers:
+        if c > 0:
+            cum += hr * h * (1 - c) / (c * p_mr)
+        if r < cum:
+            return key
+    return None
 
 
 def row_color(digits):
@@ -333,9 +379,14 @@ def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="res
         reel_text = boxed("")  # リールだけ暗転。モニターは渡された内容をそのまま出す
     else:
         reel_text = boxed(" ".join(f"│{FW_DIGITS[d]}│" for d in reels))
-    for name, text, col in (("s1", boxed(scr1), scr_col),
-                            ("s2", boxed(scr2), scr_col),
-                            ("s3", boxed(scr3), scr_col),
+    # scr_col はタプル (s1色, s2色, s3色) でも単色でもOK
+    if isinstance(scr_col, (tuple, list)):
+        c1, c2, c3 = scr_col
+    else:
+        c1 = c2 = c3 = scr_col
+    for name, text, col in (("s1", boxed(scr1), c1),
+                            ("s2", boxed(scr2), c2),
+                            ("s3", boxed(scr3), c3),
                             ("rl", reel_text, reel_col)):
         if _prev[name] is not None and _prev[name] != col:
             ops.append(("c", f"{name}_{_prev[name]}"))
@@ -496,7 +547,10 @@ def decide(rush=False):
                 return [7, 7, 7], "zenkaiten"
             d = random.choice([0, 1, 2, 3, 4, 5, 6, 8, 9])
             return [d, d, d], random.choice(HIT_PATTERNS)
-        return miss_reels(), "normal"
+        # RUSH終了スピンも必ずリーチしてから散る（最後の1リールで外す）
+        d = random.randint(0, 9)
+        e = random.choice([x for x in range(10) if x != d])
+        return [d, d, e], "normal"
     denom = jackpot_denom(session_pct())
     if random.random() < 1 / denom:
         d = _hit_digit()
@@ -681,6 +735,13 @@ def land_spin(pane):
     promote = rush and hit and not is_777  # RUSHの昇格演出（最終的に777表示になる）
     # リーチした（先に止まる2つが揃って見えた）かどうか。おしい判定にも使う
     teased = hit or pattern in ("blackout", "hasami", "reverse") or final[0] == final[1]
+    # リーチ中の信頼度示唆（文字色とセリフ）を抽選。RUSHのハズレは無示唆で散る
+    denom = jackpot_denom(session_pct())
+    if hit or not rush:
+        v_color = _tier_pick(REACH_COLOR_TIERS, hit, denom)
+        v_line = _tier_pick(REACH_LINE_TIERS, hit, denom)
+    else:
+        v_color = v_line = None
     if pattern == "zenkaiten":
         # 音とポップアップは全回転シーケンス内で処理される
         zenkaiten_sequence(pane, stats)
@@ -700,16 +761,25 @@ def land_spin(pane):
             shown = [final[i] for i in range(3) if locked[i]]
             in_tease = locked.count(False) == 1 and len(shown) == 2 and shown[0] == shown[1]
             if in_tease:
-                s1 = REACH_S1[f % len(REACH_S1)]
-                s2 = REACH_S2[(f // 2) % len(REACH_S2)]
-                sc = "r"  # リーチは赤ピンクで煽る
+                # 上段=セリフ示唆 / 中段=リーチ文字（色で示唆） / 下段=あおり
+                if v_line == "おめでとう":
+                    line_col = RAINBOW_CYCLE[f % 5]  # 確定セリフは虹色で切り替わる
+                elif v_line == "激アツ！":
+                    line_col = "r"
+                else:
+                    line_col = "w"
+                s1 = v_line if v_line else REACH_LINE_FILLERS[(f // 2) % len(REACH_LINE_FILLERS)]
+                s2 = REACH_S1[f % len(REACH_S1)]
+                s3 = REACH_S2[(f // 2) % len(REACH_S2)]
+                sc = (line_col, v_color or "w", "w")
                 delay = 0.3
             else:
                 s1 = "とまるにぇ！"
                 s2 = SPIN_WAVE[f % len(SPIN_WAVE)]
+                s3 = ""
                 sc = "w"
                 delay = 0.25
-            render(pane, cur, s1, s2, stats, locked, scr_col=sc,
+            render(pane, cur, s1, s2, stats, locked, scr_col=sc, scr3=s3,
                    marquee_off=(pattern == "blackout" and in_tease))
             time.sleep(delay)
             f += 1
