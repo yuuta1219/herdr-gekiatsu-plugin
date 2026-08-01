@@ -222,7 +222,7 @@ def stats_write(stats):
 
 import unicodedata
 
-INNER = 15  # 筐体の内側の表示幅（桁数）
+INNER = 20  # 筐体の内側の表示幅（桁数）。受け皿にコイン10枚(=20桁)が収まる幅
 FW_DIGITS = "０１２３４５６７８９"
 
 C_TOP = "╔" + "═" * INNER + "╗"
@@ -262,16 +262,18 @@ def row_color(digits):
 
 
 def button_row(locked, lever):
-    """停止ボタン3つとレバーを1行に統合（右サイドにレバー）。"""
-    cells = " ".join(f" {'●' if l else '○'}  " for l in locked).rstrip()
+    """停止ボタン3つとレバーを1行に統合（右サイドにレバー）。
+    ボタンはリール（センタリング済み）の真下に来るよう同じ左マージンを付ける。"""
+    reel_margin = (INNER - 14) // 2  # リール列(幅14)のセンタリング左余白と揃える
+    cells = " " * reel_margin + " ".join(f" {'●' if l else '○'}  " for l in locked).rstrip()
     pad = max(0, INNER - dwidth(cells))
     return "║" + cells + " " * pad + ("╠●" if lever == "pulled" else "╠══○")
 
 
 def tray_row(balls):
-    """出玉トレイ（筐体の下、枠外）。5000玉ごとに🪙が1枚増える（最大10枚）。"""
-    coins = min(10, balls // COIN_UNIT)
-    return ("🪙" * coins + f" {balls}玉").strip()
+    """筐体内の受け皿。5000玉ごとに🪙が1枚増える（最大10枚=幅ぴったり）。
+    玉数の数字はタイトル（display_agent）側に出す。"""
+    return boxed("🪙" * min(10, balls // COIN_UNIT))
 
 
 def report_tokens(pane, ops):
@@ -287,20 +289,21 @@ def report_tokens(pane, ops):
         herdr_cli("pane", "report-metadata", pane, "--source", SOURCE, *args)
 
 
-# 前フレームでどの色トークンを使ったか（差分クリア用）
-_prev = {"s1": None, "s2": None, "rl": None}
+# 前フレームでどの色トークン/玉数を使ったか（差分更新用）
+_prev = {"s1": None, "s2": None, "rl": None, "balls": None}
 
 
 def paint_statics(pane):
     """固定枠の描画 + 全色バリアントの掃除（起動/メンテ時に1回）。"""
     ops = [("t", "s_top", C_TOP), ("t", "s_sep1", C_SEP1), ("t", "s_sep2", C_SEP2),
-           ("t", "s_rl_t", REEL_TOP), ("t", "s_rl_b", REEL_BOT), ("t", "s_bot", C_BOT),
+           ("t", "s_sep3", C_SEP2), ("t", "s_rl_t", REEL_TOP), ("t", "s_rl_b", REEL_BOT),
+           ("t", "s_bot", C_BOT),
            ("c", "s_gap")]  # 旧レイアウトのレバー行トークンを掃除
     for name in ("s1", "s2"):
         ops += [("c", f"{name}_{ck}") for ck in SCR_PALETTE]
     ops += [("c", f"rl_{ck}") for ck in PALETTE]
     report_tokens(pane, ops)
-    _prev["s1"] = _prev["s2"] = _prev["rl"] = None
+    _prev["s1"] = _prev["s2"] = _prev["rl"] = _prev["balls"] = None
 
 
 def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="rest",
@@ -314,6 +317,12 @@ def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="res
     ops = [("t", "s_marq", boxed(marquee)),
            ("t", "s_btn", button_row(locked, lever)),
            ("t", "s_tray", tray_row(stats.get("balls", 0)))]
+    # 玉数はタイトル（display_agent）側に出す。変わったときだけ更新
+    balls = stats.get("balls", 0)
+    if _prev["balls"] != balls:
+        herdr_cli("pane", "report-metadata", pane, "--source", SOURCE,
+                  "--display-agent", f"{AGENT_DISPLAY} {balls}玉")
+        _prev["balls"] = balls
     # モニター2行 + リール行: 使う色に値を入れ、色が変わったときだけ旧色をクリア
     if blank:
         reel_text = boxed("")
@@ -343,7 +352,7 @@ def setup_block(workspaces=None):
         herdr_cli("pane", "report-agent", pane, "--source", SOURCE,
                   "--agent", AGENT_ID, "--state", "idle")
         herdr_cli("pane", "report-metadata", pane, "--source", SOURCE,
-                  "--display-agent", AGENT_DISPLAY)
+                  "--display-agent", f"{AGENT_DISPLAY} {stats_read().get('balls', 0)}玉")
         paint_statics(pane)
     return pane
 
