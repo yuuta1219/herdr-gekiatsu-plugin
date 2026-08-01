@@ -788,13 +788,17 @@ def play_announcement(pane, stats, ann, step_level):
             frame(_ticker(nye, f * 3), _ticker(nye, f * 3 + 2), _ticker(nye, f * 3 + 4),
                   ["r", "y"][f % 2], 0.3)
     elif ann == "logo":
-        # ロゴ落下: 激→ア→ツ が上から降って積み上がる
-        seq = [("ツ", "", ""), ("", "ツ", ""), ("", "", "ツ"),
-               ("ア", "", "ツ"), ("", "ア", "ツ"),
-               ("激", "ア", "ツ")]
+        # ロゴ落下: ツ→右下、ア→中央、激→左上 に対角で降って決まる
+        tsu, a, geki = _at_offset("ツ", 13), _at_offset("ア", 6), _at_offset("激", 0)
+        seq = [(_at_offset("ツ", 13), "", ""),
+               ("", _at_offset("ツ", 13), ""),
+               ("", "", tsu),
+               (_at_offset("ア", 6), "", tsu),
+               ("", a, tsu),
+               (geki, a, tsu)]
         for s1, s2, s3 in seq:
             frame(s1, s2, s3, "r", 0.3)
-        frame("激", "ア", "ツ", "y", 0.6)
+        frame(geki, a, tsu, "y", 0.7)
 
 
 def reach_flow(pane, cur, locked, stats):
