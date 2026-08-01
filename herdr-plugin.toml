@@ -1,0 +1,44 @@
+id = "miko.claude-slot"
+name = "Claude Slot"
+version = "1.0.0"
+min_herdr_version = "0.7.0"
+description = "Claude Code usage counter, but it's a pachislot machine. One spin per Claude interaction; daily reset at 10:00 JST; jackpot at 1/99."
+platforms = ["macos", "linux"]
+
+[[startup]]
+command = ["python3", "slot.py", "ensure"]
+
+[[actions]]
+id = "start"
+title = "Claude slot: start"
+contexts = ["workspace"]
+command = ["python3", "slot.py", "ensure"]
+
+[[actions]]
+id = "stop"
+title = "Claude slot: stop"
+contexts = ["workspace"]
+command = ["python3", "slot.py", "stop"]
+
+[[actions]]
+id = "spin"
+title = "Claude slot: test spin"
+contexts = ["workspace"]
+command = ["python3", "slot.py", "spin"]
+
+[[panes]]
+id = "fever"
+title = "🎰 FEVER"
+placement = "popup"
+width = 64
+height = 32
+command = ["python3", "slot.py", "fever"]
+
+# 新しいワークスペースができたら最下段の座を守る
+[[events]]
+on = "workspace.created"
+command = ["python3", "slot.py", "fix"]
+
+[[events]]
+on = "pane.created"
+command = ["python3", "slot.py", "ensure"]
