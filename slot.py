@@ -747,12 +747,13 @@ def land_spin(pane):
         zenkaiten_sequence(pane, stats)
     else:
         # 0.25s/フレーム × 2フレーム間隔 = ボタンは0.5秒ずつ順に止まる
+        # リーチ時は最後の1リールを約3秒じらす（示唆をじっくり見せる）
         if pattern == "hasami":
-            lock_at = [4, 10, 2]   # ハサミ押し: 右→左→中央
+            lock_at = [4, 15, 2]   # ハサミ押し: 右→左→中央
         elif pattern == "reverse":
-            lock_at = [10, 4, 2]   # 逆押し: 右→中央→左
+            lock_at = [15, 4, 2]   # 逆押し: 右→中央→左
         else:
-            lock_at = [2, 4, 10 if teased else 6]
+            lock_at = [2, 4, 15 if teased else 6]
         f = 0
         while f <= max(lock_at):
             locked = [f >= lock_at[i] for i in range(3)]
