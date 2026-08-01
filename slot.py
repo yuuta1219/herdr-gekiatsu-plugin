@@ -827,8 +827,10 @@ def land_spin(pane):
     """回答完了（=ユーザー待ち）の瞬間に呼ばれて、リールを順に止める。"""
     stats = stats_read()
     rush = bool(stats.get("rush"))
-    # 出目の決定: 仕込み > 保留（前回転で先行抽選済み） > その場で抽選
-    held = stats.pop("held", None)
+    # 出目の決定: 仕込み > 保留キュー（最大3個、入賞順に消化） > その場で抽選
+    held_q = stats.get("held") or []
+    if isinstance(held_q, dict):
+        held_q = [held_q]  # 旧形式(単一保留)からの移行
     forced = consume_force()
     if forced is not None:
         if forced == [7, 7, 7]:
@@ -837,10 +839,12 @@ def land_spin(pane):
             final, pattern = forced, random.choices(HIT_PATTERNS, HIT_PATTERN_W)[0]
         else:
             final, pattern = forced, "normal"
-    elif held:
-        final, pattern = held["final"], held["pattern"]
+    elif held_q:
+        entry = held_q.pop(0)
+        final, pattern = entry["final"], entry["pattern"]
     else:
         final, pattern = decide_lottery(rush)
+    stats["held"] = held_q
     hit = final[0] == final[1] == final[2]
     is_777 = final == [7, 7, 7]
     promote = rush and hit and not is_777  # RUSHの昇格演出（最終的に777表示になる）
@@ -981,14 +985,19 @@ def land_spin(pane):
             stats_write(stats)
             render(pane, final, "（´・ω・｀）", "ざんねん…", stats, scr3="つぎいくにぇ")
             time.sleep(2.0)
-    # ---- 保留変化用: 次回転の出目を先行抽選しておく（アツければ待機中に告知） ----
+    # ---- 保留補充: つねに3個先まで先行抽選（保留ランプ/保留変化の先読み用） ----
     stats = stats_read()
-    if not os.path.exists(FORCE_FILE):
+    q = stats.get("held") or []
+    if isinstance(q, dict):
+        q = [q]
+    while len(q) < 3:
         nf, np_ = decide_lottery(bool(stats.get("rush")))
         nh = nf[0] == nf[1] == nf[2]
-        hint = (nh and random.random() < 0.4) or ((not nh) and random.random() < 0.005)
-        stats["held"] = {"final": nf, "pattern": np_, "hint": hint}
-        stats_write(stats)
+        q.append({"final": nf, "pattern": np_,
+                  "hint": (nh and random.random() < 0.4)
+                          or ((not nh) and random.random() < 0.005)})
+    stats["held"] = q
+    stats_write(stats)
 
 
 def ambient_frame(pane, stats, f):
@@ -1025,13 +1034,17 @@ def ambient_frame(pane, stats, f):
                    reel_col="b", scr_col=["b", "c"][f % 2], scr3=s3)
     else:
         s2 = ["めざせ７７７", SPIN_WAVE[f % len(SPIN_WAVE)]][f % 2]
-        if stats.get("held", {}).get("hint"):
-            # 保留変化: 次の回転がアツいことを先に匂わせる（信頼度は高め）
-            s3 = ["次の回転…", "アツいかも！？"][(f // 2) % 2]
+        # 保留ランプ: ●=保留変化(アツい)、○=通常。位置で何回転後かも分かる
+        q = stats.get("held") or []
+        if isinstance(q, dict):
+            q = [q]
+        lamps = "保留 " + "".join("●" if e.get("hint") else "○" for e in q[:3])
+        if any(e.get("hint") for e in q[:3]):
+            s3 = [lamps, "アツいかも！？"][(f // 2) % 2]
             render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3,
                    scr_col=("w", "w", "p"))
         else:
-            s3 = ["１回転＝１送信", "回せば当たる…"][(f // 3) % 2]
+            s3 = [lamps, "１回転＝１送信", "回せば当たる…"][(f // 3) % 3]
             render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3)
 
 
