@@ -74,7 +74,7 @@ agent_panel_sort = "spaces"
 # 筐体レイアウト（色違いトークンは出し分け式。行内は常に1トークンだけ値を持つ）
 [ui.sidebar.agents]
 rows = [
-  ["state_icon", "workspace"],
+  ["state_icon", "agent"],
   [{ token = "$s_top", fg = "#e987ae" }],
   [{ token = "$s_marq", fg = "#f5c2e7" }],
   [{ token = "$s_sep1", fg = "#e987ae" }],
@@ -114,7 +114,7 @@ herdr plugin action invoke stop --plugin miko.claude-slot
 
 ## 仕組み
 
-- ミニワークスペース（🎰）の pane を `herdr pane report-agent` で疑似エージェント化し、pane メタデータトークンで筐体を1行ずつ描画
+- ミニワークスペース（🎰 Claude）の pane を `herdr pane report-agent` で疑似エージェント化し、pane メタデータトークンで筐体を1行ずつ描画。姉妹プラグイン claude-usage とはワークスペースを共有するので、2つ入れてもスペース一覧は1枠だけ
 - Claude の状態変化は socket API `agent.list` の1秒ポーリングで検知
 - 色は「同じ行に色違いトークンを並べ、使う色だけに値を入れる」方式（herdr のトークン色は config 固定のため）
 - 777 の確定ポップアップはプラグインペイン（64x32 セル、popup 配置）。プロセス終了で自動クローズ

@@ -35,7 +35,8 @@ import time
 PLUGIN_ID = "miko.claude-slot"
 SOURCE = f"plugin:{PLUGIN_ID}"
 AGENT_ID = "slot"
-WS_LABEL = "🎰 スロット"
+WS_LABEL = "🎰 Claude"  # claude-usage と同居する共有ミニワークスペース（スペース1枠に統合）
+AGENT_DISPLAY = "🎰 くろスロ"  # agents パネルでの見出し（display_agent 経由）
 # 大当たり確率はセッション使用率に連動（Claudeをいっぱい使うほど甘くなる仕様）
 # 〜50%: 1/99 → 以降10%ごとに分母が10ずつ減り、90%以上で 1/10
 BASE_DENOM = 99
@@ -50,6 +51,7 @@ STATE_DIR = os.path.expanduser("~/.local/state/herdr/plugins/miko.claude-slot")
 SOCKET_PATH = os.environ.get("HERDR_SOCKET_PATH", "") or os.path.expanduser("~/.config/herdr/herdr.sock")
 PIDFILE = os.path.join(STATE_DIR, "daemon.pid")
 WS_ID_FILE = os.path.join(STATE_DIR, "workspace.id")
+PANE_ID_FILE = os.path.join(STATE_DIR, "pane.id")
 STATS_FILE = os.path.join(STATE_DIR, "stats.json")
 FEVER_FILE = os.path.join(STATE_DIR, "fever.json")  # popup 演出との連絡用
 SQUID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "squid.txt")
@@ -121,16 +123,49 @@ def ensure_slot_workspace(workspaces):
     return target
 
 
-def find_pane(workspace_id):
+def list_panes(workspace_id):
     out = herdr_cli("pane", "list")
     if out.returncode != 0:
-        return None
+        return []
     panes = json.loads(out.stdout)["result"]["panes"]
-    return next((p["pane_id"] for p in panes if p["workspace_id"] == workspace_id), None)
+    return [p["pane_id"] for p in panes if p["workspace_id"] == workspace_id]
+
+
+def agent_panes():
+    """疑似エージェント登録済みの pane_id → agent 名のマップ。"""
+    out = herdr_cli("agent", "list")
+    try:
+        return {a["pane_id"]: a.get("agent") for a in json.loads(out.stdout)["result"]["agents"]}
+    except Exception:
+        return {}
+
+
+def my_pane(workspace_id):
+    """共有ワークスペース内で自分(slot)が使うペインを確保する。
+    記憶済み → 空きペイン（エージェント未登録） → 分割で新規、の順。"""
+    panes = list_panes(workspace_id)
+    try:
+        stored = open(PANE_ID_FILE).read().strip()
+    except OSError:
+        stored = None
+    if stored in panes:
+        return stored
+    taken = agent_panes()
+    pane = next((p for p in panes if taken.get(p) in (None, AGENT_ID)), None)
+    if pane is None and panes:
+        out = herdr_cli("pane", "split", panes[0], "--direction", "down")
+        try:
+            pane = json.loads(out.stdout)["result"]["pane"]["pane_id"]
+        except Exception:
+            return None
+    if pane:
+        with open(PANE_ID_FILE, "w") as f:
+            f.write(pane)
+    return pane
 
 
 def pin_bottom(workspaces, target):
-    """The slot sits at the absolute bottom; claude-flex knows to stay above 🎰."""
+    """The shared mini-space sits at the absolute bottom of the sidebar."""
     ids = [w["workspace_id"] for w in workspaces]
     if ids and ids[-1] != target and target in ids:
         # insert_index semantics: "insert before the element at this pre-removal
@@ -280,10 +315,12 @@ def setup_block(workspaces=None):
     if not target:
         return None
     pin_bottom(workspaces, target)
-    pane = find_pane(target)
+    pane = my_pane(target)
     if pane:
         herdr_cli("pane", "report-agent", pane, "--source", SOURCE,
                   "--agent", AGENT_ID, "--state", "idle")
+        herdr_cli("pane", "report-metadata", pane, "--source", SOURCE,
+                  "--display-agent", AGENT_DISPLAY)
         paint_statics(pane)
     return pane
 
@@ -719,8 +756,20 @@ def cmd_stop():
         workspaces = list_workspaces()
         mine = stored_workspace_id()
         if mine and any(w["workspace_id"] == mine for w in workspaces):
-            herdr_cli("workspace", "close", mine)
+            # 共有ワークスペースなので、他の疑似エージェント(usage等)が居なければ閉じる
+            others = [p for p, a in agent_panes().items()
+                      if p.startswith(mine + ":") and a != AGENT_ID]
+            if others:
+                try:
+                    pane = open(PANE_ID_FILE).read().strip()
+                    herdr_cli("pane", "release-agent", pane, "--source", SOURCE)
+                    herdr_cli("pane", "close", pane)
+                except OSError:
+                    pass
+            else:
+                herdr_cli("workspace", "close", mine)
         os.remove(WS_ID_FILE)
+        os.remove(PANE_ID_FILE)
     except Exception:
         pass
     try:
