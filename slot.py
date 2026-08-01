@@ -970,7 +970,7 @@ def load_art(path, fallback):
 
 def cmd_fever():
     """777確定演出ポップアップ（64x32セル）。reach 中は王冠がグレーでせり上がり、
-    win で虹色の王冠3000。win 表示から10秒で自動終了（手動でも閉じられる）。"""
+    win で虹色の王冠3000。win 表示から5秒で自動終了（手動でも閉じられる）。"""
     art = ["  " + l for l in load_art(FEVER777_FILE, "3000 FEVER")]
     out = sys.stdout
     out.write("\033[?25l")  # カーソル隠す
@@ -1001,7 +1001,7 @@ def cmd_fever():
         # --- 大当りフェーズ: 虹色の王冠3000 ---
         t_win = time.time()
         f = 0
-        while time.time() - t_win < 10:
+        while time.time() - t_win < 5:
             out.write("\033[2J\033[H")
             head_c = ANSI_RAINBOW[f % len(ANSI_RAINBOW)]
             out.write(f"\033[1m\033[38;5;{head_c}m{'　' * 5}"
@@ -1010,7 +1010,7 @@ def cmd_fever():
                 c = ANSI_RAINBOW[(i + f) % len(ANSI_RAINBOW)]
                 out.write(f"\033[38;5;{c}m{line}\033[0m\n")
             tail_c = ANSI_RAINBOW[(f + 4) % len(ANSI_RAINBOW)]
-            remain = 10 - int(time.time() - t_win)
+            remain = 5 - int(time.time() - t_win)
             out.write(f"\033[1m\033[38;5;{tail_c}m{'　' * 7}"
                       f"｜｜　３０００ ＦＥＶＥＲ　｜｜\033[0m")
             out.write(f"\033[2m ({remain}s)\033[0m\n")
