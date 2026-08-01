@@ -356,15 +356,29 @@ def jackpot_denom(pct):
     return BASE_DENOM - 10 * ((int(pct) - 40) // 10)
 
 
+def _valid_triple(t):
+    return (isinstance(t, list) and len(t) == 3
+            and all(isinstance(d, int) and 0 <= d <= 9 for d in t))
+
+
 def pick_outcome():
-    # 仕込み: force.json に [7,7,7] などを置くと次の1回だけその出目で着地する
+    # 仕込み: force.json に [7,7,7]（1回分）か [[1,2,3],[7,7,7],...]（予約キュー）
+    # を置くと、その出目で順に着地する（消化したら自動削除）
     try:
         with open(FORCE_FILE) as f:
             forced = json.load(f)
-        os.remove(FORCE_FILE)
-        if (isinstance(forced, list) and len(forced) == 3
-                and all(isinstance(d, int) and 0 <= d <= 9 for d in forced)):
+        if _valid_triple(forced):
+            os.remove(FORCE_FILE)
             return forced
+        if isinstance(forced, list) and forced and all(_valid_triple(t) for t in forced):
+            nxt = forced.pop(0)
+            if forced:
+                with open(FORCE_FILE, "w") as f:
+                    json.dump(forced, f)
+            else:
+                os.remove(FORCE_FILE)
+            return nxt
+        os.remove(FORCE_FILE)
     except Exception:
         pass
     if random.random() < 1 / jackpot_denom(session_pct()):

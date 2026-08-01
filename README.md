@@ -111,6 +111,7 @@ herdr plugin action invoke stop --plugin gekiatsu.claude-slot
 
 デバッグ用に、状態ディレクトリ（`~/.local/state/herdr/plugins/gekiatsu.claude-slot/`）へ
 `force.json` に `[7, 7, 7]` を書いておくと**次の1回だけ**その出目で着地します。
+`[[1,2,3], [3,3,3], [7,7,7]]` のように並べると予約キューになり、順に消化されます（デモ撮影用）。
 
 ## 仕組み
 
