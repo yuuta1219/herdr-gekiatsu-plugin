@@ -311,14 +311,17 @@ def paint_statics(pane):
 
 
 def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="rest",
-           reel_col=None, scr_col="w", blank=False, scr3="", extra_ops=None):
+           reel_col=None, scr_col="w", blank=False, scr3="", extra_ops=None,
+           marquee_off=False):
     """reel_col: リール行の色キー（省略時は偶奇多数決）。
     scr_col: モニター3行(scr1/scr2/scr3)の色キー。色はトークンの出し分けで実現する。
-    blank=True でリール暗転（ぷちゅん演出用）。extra_ops は追加トークン操作。"""
+    blank=True でリール暗転（ぷちゅん演出用）。marquee_off=True で統計行を消灯（当たり予告）。"""
     if reel_col is None:
         reel_col = row_color(reels)
     # 統計行は「N揃い/M回転」と「出玉 N玉」を2秒ごとに切り替える
-    if int(time.time() // 2) % 2:
+    if marquee_off:
+        marquee = ""  # 消灯予告: リーチ中にここが消えたら当たり確定
+    elif int(time.time() // 2) % 2:
         marquee = f"出玉 {stats.get('balls', 0)}玉"
     else:
         marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
@@ -576,6 +579,37 @@ def promote_sequence(pane, decoy, stats):
         time.sleep(0.35)
 
 
+def zenkaiten_sequence(pane, stats):
+    """777専用の最強演出「全回転」: リーチ中にぷちゅん →「中央に注目！」虹点滅
+    → 111が揃ったまま昇順に流れて 777 で停止。ポップアップは222のタイミングで召喚。"""
+    # 序盤: 普通に左2つに７が止まってリーチが始まる（フェイク）
+    for f in range(7):
+        locked = [f >= 2, f >= 4, False]
+        cur = [7 if locked[i] else random.randint(0, 9) for i in range(3)]
+        if f >= 4:
+            s1, s2, sc, delay = REACH_S1[f % 4], REACH_S2[(f // 2) % 4], "r", 0.3
+        else:
+            s1, s2, sc, delay = "とまるにぇ！", SPIN_WAVE[f % len(SPIN_WAVE)], "w", 0.25
+        render(pane, cur, s1, s2, stats, locked, scr_col=sc)
+        time.sleep(delay)
+    # リーチ中にまさかのぷちゅん
+    puchun(pane, [7, 7, 7], stats)
+    # 復帰: 「中央に注目！」虹点滅（リールはまだ暗転）
+    for f in range(3):
+        render(pane, [0, 0, 0], "", "中央に注目！", stats, [False] * 3, blank=True,
+               scr_col=RAINBOW_CYCLE[f % 5])
+        time.sleep(0.45)
+    # 全回転: 111 から揃ったまま昇順で流れる。222 でポップアップ召喚
+    for i, d in enumerate([1, 2, 3, 4, 5, 6, 7]):
+        if d == 2:
+            fever_write("reach", [7, 7, 7])
+            herdr_cli("plugin", "pane", "open",
+                      "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
+        render(pane, [d, d, d], "", "中央に注目！", stats, [False] * 3,
+               reel_col=RAINBOW_CYCLE[i % 5], scr_col=RAINBOW_CYCLE[(i + 2) % 5])
+        time.sleep(0.6)
+
+
 def land_spin(pane):
     """回答完了（=ユーザー待ち）の瞬間に呼ばれて、リールを順に止める。"""
     stats = stats_read()
@@ -585,33 +619,43 @@ def land_spin(pane):
     hit = final[0] == final[1] == final[2]
     is_777 = final == [7, 7, 7]
     promote = rush and hit and not is_777  # RUSHの昇格演出（最終的に777表示になる）
+    # リーチ当たりの演出分岐: 777=全回転固定、他の当たりは1/3ずつで
+    # 通常 / 消灯予告(統計行が消える) / 逆押し予告(右→左→中央で停止)
     if is_777:
-        # 最初から777確定のときだけ FEVER ポップアップを開く。
-        # --no-focus 必須: フォーカスを奪うと、直後に回答完了する claude が
-        # 「非フォーカスで finished」扱いになって herdr の通知が鳴ってしまう
-        fever_write("reach", final)
-        herdr_cli("plugin", "pane", "open",
-                  "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
-    # 0.25s/フレーム × 2フレーム間隔 = ボタンは0.5秒ずつ順に止まる（見やすさ重視）
-    locks = [2, 4, 10 if reach else 6]
-    f = 0
-    while f <= locks[-1]:
-        locked = [f >= lk for lk in locks]
-        cur = [final[i] if locked[i] else random.randint(0, 9) for i in range(3)]
-        in_reach = reach and locked[1] and not locked[2]
-        if in_reach:
-            s1 = REACH_S1[f % len(REACH_S1)]
-            s2 = REACH_S2[(f // 2) % len(REACH_S2)]
-            sc = "r"  # リーチは赤ピンクで煽る
-            delay = 0.3
+        pattern = "zenkaiten"
+    elif hit:
+        pattern = random.choice(["normal", "blackout", "reverse"])
+    else:
+        pattern = "normal"
+    if pattern == "zenkaiten":
+        # ポップアップは全回転シーケンス内(222のタイミング)で開く
+        zenkaiten_sequence(pane, stats)
+    else:
+        # 0.25s/フレーム × 2フレーム間隔 = ボタンは0.5秒ずつ順に止まる
+        if pattern == "reverse":
+            lock_at = [4, 10, 2]  # 右→左→中央（中央が最後=ハサミリーチ）
         else:
-            s1 = "とまるにぇ！"
-            s2 = SPIN_WAVE[f % len(SPIN_WAVE)]
-            sc = "w"
-            delay = 0.25
-        render(pane, cur, s1, s2, stats, locked, scr_col=sc)
-        time.sleep(delay)
-        f += 1
+            lock_at = [2, 4, 10 if reach else 6]
+        f = 0
+        while f <= max(lock_at):
+            locked = [f >= lock_at[i] for i in range(3)]
+            cur = [final[i] if locked[i] else random.randint(0, 9) for i in range(3)]
+            # 残り1リールが回っていて、揃う目が生きている間はリーチ演出
+            in_tease = locked.count(False) == 1 and reach
+            if in_tease:
+                s1 = REACH_S1[f % len(REACH_S1)]
+                s2 = REACH_S2[(f // 2) % len(REACH_S2)]
+                sc = "r"  # リーチは赤ピンクで煽る
+                delay = 0.3
+            else:
+                s1 = "とまるにぇ！"
+                s2 = SPIN_WAVE[f % len(SPIN_WAVE)]
+                sc = "w"
+                delay = 0.25
+            render(pane, cur, s1, s2, stats, locked, scr_col=sc,
+                   marquee_off=(pattern == "blackout" and in_tease))
+            time.sleep(delay)
+            f += 1
     stats["spins"] += 1
     if hit:
         stats["hits"] += 1
