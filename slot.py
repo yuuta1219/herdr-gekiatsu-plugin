@@ -222,7 +222,7 @@ def stats_write(stats):
 
 import unicodedata
 
-INNER = 20  # 筐体の内側の表示幅（桁数）。受け皿にコイン10枚(=20桁)が収まる幅
+INNER = 15  # 筐体の内側の表示幅（桁数）。受け皿はコイン7枚(=14桁)まで置ける
 FW_DIGITS = "０１２３４５６７８９"
 
 C_TOP = "╔" + "═" * INNER + "╗"
@@ -271,9 +271,9 @@ def button_row(locked, lever):
 
 
 def tray_row(balls):
-    """筐体内の受け皿。5000玉ごとに🪙が1枚増える（最大10枚=幅ぴったり）。
+    """筐体内の受け皿。5000玉ごとに🪙が1枚増える（幅15桁なので最大7枚=35,000玉で満杯）。
     玉数の数字はタイトル（display_agent）側に出す。"""
-    return boxed("🪙" * min(10, balls // COIN_UNIT))
+    return boxed("🪙" * min(7, balls // COIN_UNIT))
 
 
 def report_tokens(pane, ops):
@@ -537,11 +537,10 @@ def promote_sequence(pane, decoy, stats):
     cols, sc = triple_colors(decoy[0])
     render(pane, decoy, f"＼{d3}／", "そろった！？", stats, reel_col=cols, scr_col=sc)
     time.sleep(0.9)
-    # ぷちゅん
+    # ぷちゅん（昇格では777.mp3は鳴らさない。音は直777の1%だけの特権）
     render(pane, decoy, "", "", stats, blank=True, scr_col="w")
     time.sleep(0.8)
     final = [7, 7, 7]
-    play_777_sound()
     for f in range(6):
         render(pane, final, ["＼昇格！！／", "★７７７★"][f % 2],
                ["＋１５００玉", "☆☆☆☆☆"][f % 2], stats,
