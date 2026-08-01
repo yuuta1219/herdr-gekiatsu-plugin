@@ -43,6 +43,16 @@ BASE_DENOM = 99
 HOT_DENOM = 10      # 使用率90%以上の激甘モード
 P_777 = 0.01        # 大当たりの内訳: 777 = 1%
 P_ODD = 0.49        # 〃 奇数揃い(1,3,5,9) = 49%（残り50%が偶数揃い 0,2,4,6,8）
+REACH_P = 0.10      # ハズレ時にリーチ（左2つ揃い）が発生する確率
+# RUSH: 奇数揃い or 777 の当選で突入。ハズレ(1/5)を引くまで継続
+RUSH_WIN_P = 0.8          # RUSH中の当選率 4/5
+RUSH_DIRECT777_P = 0.01   # RUSH当選の1%は最初から777（+3000玉）。残り99%は昇格演出（+1500玉）
+PAY_EVEN = 300
+PAY_ODD = 1500
+PAY_777 = 3000
+PAY_RUSH = 1500
+PAY_RUSH777 = 3000
+COIN_UNIT = 5000    # 出玉トレイのコイン1枚あたりの玉数（最大10枚=5万）
 MAINT_INTERVAL_S = 60
 
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
@@ -191,9 +201,12 @@ def stats_read():
         stats = {"spins": 0, "hits": 0, "last": [7, 7, 7]}
     today = pachi_day()
     if stats.get("day") != today:
-        # 開店リセット: 回転数・揃い数は毎日 JST 10:00 にゼロから
-        stats = {"spins": 0, "hits": 0, "last": stats.get("last", [7, 7, 7]), "day": today}
+        # 開店リセット: 回転数・揃い数・出玉・RUSHは毎日 JST 10:00 にゼロから
+        stats = {"spins": 0, "hits": 0, "balls": 0, "rush": False,
+                 "last": stats.get("last", [7, 7, 7]), "day": today}
         stats_write(stats)
+    stats.setdefault("balls", 0)
+    stats.setdefault("rush", False)
     return stats
 
 
@@ -218,7 +231,9 @@ C_SEP2 = "╟" + "─" * INNER + "╢"
 C_BOT = "╚" + "═" * INNER + "╝"
 
 def dwidth(s):
-    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+    # 絵文字(🪙等)は east_asian_width が不定なのでコードポイント範囲で2扱いにする
+    return sum(2 if (unicodedata.east_asian_width(c) in "WF" or ord(c) >= 0x1F000) else 1
+               for c in s)
 
 
 def boxed(s):
@@ -246,15 +261,17 @@ def row_color(digits):
     return "b" if evens >= 2 else "r"
 
 
-def gap_row(lever):
-    # 右サイドにレバー: 待機は水平アーム、引いた瞬間はアームが下に折れる
-    return "║" + " " * INNER + ("╠═╗" if lever == "pulled" else "╠══○")
-
-
 def button_row(locked, lever):
-    # リールのセル(4桁幅+区切り1)と同じピッチで、各リールの真下にボタンを置く
-    row = boxed(" ".join(f" {'●' if l else '○'}  " for l in locked).rstrip())
-    return row + (" ●" if lever == "pulled" else "")
+    """停止ボタン3つとレバーを1行に統合（右サイドにレバー）。"""
+    cells = " ".join(f" {'●' if l else '○'}  " for l in locked).rstrip()
+    pad = max(0, INNER - dwidth(cells))
+    return "║" + cells + " " * pad + ("╠●" if lever == "pulled" else "╠══○")
+
+
+def tray_row(balls):
+    """出玉トレイ（筐体の下、枠外）。5000玉ごとに🪙が1枚増える（最大10枚）。"""
+    coins = min(10, balls // COIN_UNIT)
+    return ("🪙" * coins + f" {balls}玉").strip()
 
 
 def report_tokens(pane, ops):
@@ -277,7 +294,8 @@ _prev = {"s1": None, "s2": None, "rl": None}
 def paint_statics(pane):
     """固定枠の描画 + 全色バリアントの掃除（起動/メンテ時に1回）。"""
     ops = [("t", "s_top", C_TOP), ("t", "s_sep1", C_SEP1), ("t", "s_sep2", C_SEP2),
-           ("t", "s_rl_t", REEL_TOP), ("t", "s_rl_b", REEL_BOT), ("t", "s_bot", C_BOT)]
+           ("t", "s_rl_t", REEL_TOP), ("t", "s_rl_b", REEL_BOT), ("t", "s_bot", C_BOT),
+           ("c", "s_gap")]  # 旧レイアウトのレバー行トークンを掃除
     for name in ("s1", "s2"):
         ops += [("c", f"{name}_{ck}") for ck in SCR_PALETTE]
     ops += [("c", f"rl_{ck}") for ck in PALETTE]
@@ -286,17 +304,22 @@ def paint_statics(pane):
 
 
 def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="rest",
-           reel_col=None, scr_col="w"):
+           reel_col=None, scr_col="w", blank=False):
     """reel_col: リール行の色キー（省略時は偶奇多数決）。
-    scr_col: モニター2行の色キー。色はトークンの出し分けで実現する。"""
+    scr_col: モニター2行の色キー。色はトークンの出し分けで実現する。
+    blank=True で暗転（ぷちゅん演出: リールもモニターも空白）。"""
     if reel_col is None:
         reel_col = row_color(reels)
     marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
     ops = [("t", "s_marq", boxed(marquee)),
-           ("t", "s_gap", gap_row(lever)),
-           ("t", "s_btn", button_row(locked, lever))]
+           ("t", "s_btn", button_row(locked, lever)),
+           ("t", "s_tray", tray_row(stats.get("balls", 0)))]
     # モニター2行 + リール行: 使う色に値を入れ、色が変わったときだけ旧色をクリア
-    reel_text = boxed(" ".join(f"│{FW_DIGITS[d]}│" for d in reels))
+    if blank:
+        reel_text = boxed("")
+        scr1 = scr2 = ""
+    else:
+        reel_text = boxed(" ".join(f"│{FW_DIGITS[d]}│" for d in reels))
     for name, text, col in (("s1", boxed(scr1), scr_col),
                             ("s2", boxed(scr2), scr_col),
                             ("rl", reel_text, reel_col)):
@@ -361,7 +384,7 @@ def _valid_triple(t):
             and all(isinstance(d, int) and 0 <= d <= 9 for d in t))
 
 
-def pick_outcome():
+def consume_force():
     # 仕込み: force.json に [7,7,7]（1回分）か [[1,2,3],[7,7,7],...]（予約キュー）
     # を置くと、その出目で順に着地する（消化したら自動削除）
     try:
@@ -381,6 +404,32 @@ def pick_outcome():
         os.remove(FORCE_FILE)
     except Exception:
         pass
+    return None
+
+
+def miss_reels():
+    """ハズレ出目。1/10 でリーチ（左2つ揃い）付きのハズレになる。"""
+    if random.random() < REACH_P:
+        d = random.randint(0, 9)
+        e = random.choice([x for x in range(10) if x != d])
+        return [d, d, e]
+    a = random.randint(0, 9)
+    b = random.choice([x for x in range(10) if x != a])
+    return [a, b, random.randint(0, 9)]
+
+
+def pick_outcome(rush=False):
+    forced = consume_force()
+    if forced is not None:
+        return forced
+    if rush:
+        # RUSH中: 4/5で当選。当選の1%は最初から777（+3000）、99%は昇格演出用の別揃い
+        if random.random() < RUSH_WIN_P:
+            if random.random() < RUSH_DIRECT777_P:
+                return [7, 7, 7]
+            d = random.choice([0, 1, 2, 3, 4, 5, 6, 8, 9])
+            return [d, d, d]
+        return miss_reels()
     if random.random() < 1 / jackpot_denom(session_pct()):
         r = random.random()
         if r < P_777:
@@ -390,10 +439,7 @@ def pick_outcome():
         else:
             d = random.choice([0, 2, 4, 6, 8])
         return [d, d, d]
-    while True:
-        reels = [random.randint(0, 9) for _ in range(3)]
-        if not reels[0] == reels[1] == reels[2]:
-            return reels
+    return miss_reels()
 
 
 SPIN_WAVE = ["≫　　　　", "　≫　　　", "　　≫　　", "　　　≫　", "　　　　≫"]
@@ -468,13 +514,43 @@ def fever_write(stage, final):
         pass
 
 
+def play_777_sound():
+    if os.path.exists(SOUND_777):
+        # 揃ったと同時に確定音（777.mp3 が置いてあれば非ブロッキング再生）
+        subprocess.Popen(["afplay", SOUND_777],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+
+
+def promote_sequence(pane, decoy, stats):
+    """RUSH当選(99%側)の演出: 別の揃い → ぷちゅん(暗転) → 777昇格 → +1500玉。"""
+    d3 = FW_DIGITS[decoy[0]] * 3
+    cols, sc = triple_colors(decoy[0])
+    render(pane, decoy, f"＼{d3}／", "そろった！？", stats, reel_col=cols, scr_col=sc)
+    time.sleep(0.9)
+    # ぷちゅん
+    render(pane, decoy, "", "", stats, blank=True, scr_col="w")
+    time.sleep(0.8)
+    final = [7, 7, 7]
+    play_777_sound()
+    for f in range(6):
+        render(pane, final, ["＼昇格！！／", "★７７７★"][f % 2],
+               ["＋１５００玉", "☆☆☆☆☆"][f % 2], stats,
+               reel_col="y", scr_col=["y", "r"][f % 2])
+        time.sleep(0.35)
+
+
 def land_spin(pane):
     """回答完了（=ユーザー待ち）の瞬間に呼ばれて、リールを順に止める。"""
     stats = stats_read()
-    final = pick_outcome()
+    rush = bool(stats.get("rush"))
+    final = pick_outcome(rush)
     reach = final[0] == final[1]
-    if final == [7, 7, 7]:
-        # 777確定のときだけ: リーチが走るこのスピンの冒頭で FEVER ポップアップを開く。
+    hit = final[0] == final[1] == final[2]
+    is_777 = final == [7, 7, 7]
+    promote = rush and hit and not is_777  # RUSHの昇格演出（最終的に777表示になる）
+    if is_777:
+        # 最初から777確定のときだけ FEVER ポップアップを開く。
         # --no-focus 必須: フォーカスを奪うと、直後に回答完了する claude が
         # 「非フォーカスで finished」扱いになって herdr の通知が鳴ってしまう
         fever_write("reach", final)
@@ -500,32 +576,70 @@ def land_spin(pane):
         time.sleep(delay)
         f += 1
     stats["spins"] += 1
-    hit = final[0] == final[1] == final[2]
     if hit:
         stats["hits"] += 1
-    stats["last"] = final
-    stats_write(stats)
-    if hit:
-        # popup が虹色演出に切り替わり、10秒後に自走終了→ポップアップも閉じる
-        fever_write("win", final)
-        if final == [7, 7, 7] and os.path.exists(SOUND_777):
-            # 揃ったと同時に確定音（777.mp3 が置いてあれば非ブロッキング再生）
-            subprocess.Popen(["afplay", SOUND_777],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
-        celebrate(pane, final, stats)
-    elif reach:
-        render(pane, final, "おしい…！！", "つぎこそにぇ", stats)
-        time.sleep(2.0)  # 余韻を見せてから ambient に引き継ぐ
+    # ---- 結果の反映（出玉・RUSH状態） ----
+    if rush:
+        if promote:
+            stats["balls"] = stats.get("balls", 0) + PAY_RUSH
+            stats["last"] = [7, 7, 7]
+            stats_write(stats)
+            promote_sequence(pane, final, stats)
+        elif is_777:
+            stats["balls"] = stats.get("balls", 0) + PAY_RUSH777
+            stats["last"] = final
+            stats_write(stats)
+            fever_write("win", final)
+            play_777_sound()
+            celebrate(pane, final, stats)
+        else:
+            # 1/5 を引いた: RUSH終了
+            stats["rush"] = False
+            stats["last"] = final
+            stats_write(stats)
+            render(pane, final, "ＲＵＳＨ終了…", "おつかれにぇ", stats)
+            time.sleep(2.0)
     else:
-        render(pane, final, "ざんねん…", "つぎいくにぇ", stats)
-        time.sleep(2.0)
+        if hit:
+            d = final[0]
+            if d == 7:
+                stats["balls"] = stats.get("balls", 0) + PAY_777
+                stats["rush"] = True
+            elif d % 2 == 1:
+                stats["balls"] = stats.get("balls", 0) + PAY_ODD
+                stats["rush"] = True
+            else:
+                stats["balls"] = stats.get("balls", 0) + PAY_EVEN
+            stats["last"] = final
+            stats_write(stats)
+            if is_777:
+                fever_write("win", final)
+                play_777_sound()
+            celebrate(pane, final, stats)
+        elif reach:
+            stats["last"] = final
+            stats_write(stats)
+            render(pane, final, "おしい…！！", "つぎこそにぇ", stats)
+            time.sleep(2.0)  # 余韻を見せてから ambient に引き継ぐ
+        else:
+            stats["last"] = final
+            stats_write(stats)
+            render(pane, final, "ざんねん…", "つぎいくにぇ", stats)
+            time.sleep(2.0)
 
 
 def ambient_frame(pane, stats, f):
     """待機中も次のスピンまで動き続けるアンビエント演出（0.7s/フレーム）。"""
     last = stats.get("last", [7, 7, 7])
     hit = last[0] == last[1] == last[2]
+    if stats.get("rush"):
+        # RUSH継続中: 次のスピンまで赤黄でギラつかせる
+        d3 = FW_DIGITS[last[0]] * 3 if hit else "７７７"
+        s1 = ["＊ＲＵＳＨ中＊", "≫ＲＵＳＨ中≪"][f % 2]
+        s2 = [f"＼{d3}／", "当選率４／５"][(f // 2) % 2]
+        render(pane, last, s1, s2, stats, reel_col="y" if last[0] == 7 else "r",
+               scr_col=["r", "y"][f % 2])
+        return
     if hit:
         d = last[0]
         d3 = FW_DIGITS[d] * 3
