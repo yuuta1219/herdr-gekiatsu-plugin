@@ -654,9 +654,15 @@ def lever_pull(pane, stats):
 def spin_frame(pane, stats, f):
     """回答待ちのあいだ回り続けるフレーム（ゆっくりめ）。"""
     cur = [random.randint(0, 9) for _ in range(3)]
-    s3 = "継続率８０％" if stats.get("rush") else SPIN_WAVE[(f + 2) % len(SPIN_WAVE)]
+    lamps, hot = hold_lamps(stats)
+    if lamps and f % 2:
+        s3, s3c = lamps, ("p" if hot else "w")
+    elif stats.get("rush"):
+        s3, s3c = "継続率８０％", "w"
+    else:
+        s3, s3c = SPIN_WAVE[(f + 2) % len(SPIN_WAVE)], "w"
     render(pane, cur, "かんがえ中…", SPIN_WAVE[f % len(SPIN_WAVE)], stats, [False] * 3,
-           scr3=s3)
+           scr3=s3, scr_col=("w", "w", s3c))
 
 
 def fever_write(stage, final):
@@ -746,6 +752,33 @@ def zenkaiten_sequence(pane, stats):
     fever_write("win", [7, 7, 7])  # win状態で開く=ポップアップは即・虹色王冠
     herdr_cli("plugin", "pane", "open",
               "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
+
+
+def enqueue_hold():
+    """入賞（landイベント発生）の瞬間に抽選して保留に積む。本物と同じく
+    「玉が入った瞬間に結果は決まっていて、演出中に来た分は保留玉として待つ」。"""
+    stats = stats_read()
+    q = stats.get("held") or []
+    if isinstance(q, dict):
+        q = [q]
+    nf, np_ = decide_lottery(bool(stats.get("rush")))
+    nh = nf[0] == nf[1] == nf[2]
+    q.append({"final": nf, "pattern": np_,
+              "hint": (nh and random.random() < 0.4)
+                      or ((not nh) and random.random() < 0.005)})
+    stats["held"] = q
+    stats_write(stats)
+
+
+def hold_lamps(stats):
+    """保留ランプ文字列と「アツい保留があるか」を返す。保留が無ければ None。"""
+    q = stats.get("held") or []
+    if isinstance(q, dict):
+        q = [q]
+    if not q:
+        return None, False
+    lamps = "保留 " + "".join("●" if e.get("hint") else "○" for e in q[:4])
+    return lamps, any(e.get("hint") for e in q[:4])
 
 
 def pseudo_rounds(pane, stats, n):
@@ -985,19 +1018,6 @@ def land_spin(pane):
             stats_write(stats)
             render(pane, final, "（´・ω・｀）", "ざんねん…", stats, scr3="つぎいくにぇ")
             time.sleep(2.0)
-    # ---- 保留補充: つねに3個先まで先行抽選（保留ランプ/保留変化の先読み用） ----
-    stats = stats_read()
-    q = stats.get("held") or []
-    if isinstance(q, dict):
-        q = [q]
-    while len(q) < 3:
-        nf, np_ = decide_lottery(bool(stats.get("rush")))
-        nh = nf[0] == nf[1] == nf[2]
-        q.append({"final": nf, "pattern": np_,
-                  "hint": (nh and random.random() < 0.4)
-                          or ((not nh) and random.random() < 0.005)})
-    stats["held"] = q
-    stats_write(stats)
 
 
 def ambient_frame(pane, stats, f):
@@ -1035,16 +1055,13 @@ def ambient_frame(pane, stats, f):
     else:
         s2 = ["めざせ７７７", SPIN_WAVE[f % len(SPIN_WAVE)]][f % 2]
         # 保留ランプ: ●=保留変化(アツい)、○=通常。位置で何回転後かも分かる
-        q = stats.get("held") or []
-        if isinstance(q, dict):
-            q = [q]
-        lamps = "保留 " + "".join("●" if e.get("hint") else "○" for e in q[:3])
-        if any(e.get("hint") for e in q[:3]):
-            s3 = [lamps, "アツいかも！？"][(f // 2) % 2]
+        lamps, hot = hold_lamps(stats)
+        if lamps:
+            s3 = [lamps, "アツいかも！？" if hot else lamps][(f // 2) % 2]
             render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3,
-                   scr_col=("w", "w", "p"))
+                   scr_col=("w", "w", "p" if hot else "w"))
         else:
-            s3 = [lamps, "１回転＝１送信", "回せば当たる…"][(f // 3) % 3]
+            s3 = ["１回転＝１送信", "回せば当たる…"][(f // 3) % 2]
             render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3)
 
 
@@ -1141,17 +1158,22 @@ def cmd_daemon():
                 active.add(pid)
             elif kind == "land":
                 active.discard(pid)
-                if pane:
-                    land_spin(pane)  # 復帰直後の land (start無し) も1回転扱い
+                # 入賞の瞬間に抽選して保留へ。演出中に来た分は保留玉として並ぶ
+                enqueue_hold()
         except queue.Empty:
             pass
         if pane:
-            if active:
-                spin_frame(pane, stats_read(), f)
+            st = stats_read()
+            q = st.get("held") or []
+            if q:
+                # 保留がある限り自動で次が回る（現実と同じ）
+                land_spin(pane)
+            elif active:
+                spin_frame(pane, st, f)
                 f += 1
             else:
                 # 待機中も次のスピンまで演出を回し続ける
-                ambient_frame(pane, stats_read(), af)
+                ambient_frame(pane, st, af)
                 af += 1
         if time.time() - last_maint > MAINT_INTERVAL_S:
             try:
