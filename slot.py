@@ -278,7 +278,7 @@ REACH_LINE_TIERS = [
 REACH_LINE_FILLERS = ["ドキドキ…", "くるかにぇ？", "むむむ…"]
 
 # ---- 予告演出（回転開始〜停止前に挟まる。占有率で信頼度が生まれる） ----
-REVIVE_P = 0.05  # 当たり(777以外)のうち復活演出(一回ハズレて蘇る)になる割合
+UPGRADE_P = 0.25  # 通常時の奇数当選のうち「偶数揃い→ぷちゅん→奇数に昇格」演出になる割合
 
 
 def _w_choice(hit, hit_table, miss_table):
@@ -805,14 +805,17 @@ def reach_flow(pane, cur, locked, stats):
         time.sleep(0.13)
 
 
-def revival_twist(pane, final, stats):
-    """復活演出: 一回ハズレて見せてから暗転→「まだだにぇ！」→本当の出目に蘇る。"""
-    for s1, s2, s3, dur in PUCHUN_FRAMES[2:]:  # 白線収縮〜暗転を再利用
-        render(pane, final, s1, s2, stats, blank=True, scr_col="w", scr3=s3)
-        time.sleep(dur)
+def upgrade_reveal(pane, decoy, final, stats):
+    """昇格演出: 偶数揃い(300ぼーなす?)→ぷちゅん→奇数揃いに変身してRUSH突入。"""
+    d3e = FW_DIGITS[decoy[0]] * 3
+    render(pane, decoy, f"＼{d3e}／", "300ぼーなす？", stats,
+           reel_col="b", scr_col="b", scr3="…かとおもいきや")
+    time.sleep(1.3)
+    puchun(pane, decoy, stats)
+    d3 = FW_DIGITS[final[0]] * 3
     for f in range(4):
-        render(pane, final, "まだだにぇ！", "！！！！", stats,
-               reel_col="y", scr_col=RAINBOW_CYCLE[f % 5], scr3="復活！！")
+        render(pane, final, "＼昇格！！／", f"＼{d3}／", stats,
+               reel_col="r", scr_col=["r", "y"][f % 2], scr3="ＲＵＳＨ突入！")
         time.sleep(0.4)
 
 
@@ -841,12 +844,10 @@ def land_spin(pane):
     teased = hit or pattern in ("blackout", "hasami", "reverse") or final[0] == final[1]
     # リーチ中の信頼度示唆（文字色とセリフ）を抽選。RUSHのハズレは無示唆で散る
     denom = jackpot_denom(session_pct())
-    revive = hit and not is_777 and random.random() < REVIVE_P  # 復活演出（一回死ぬ）
-    if revive:
-        # ハズレを装うので示唆もハズレ側の出現率でロール（本気で騙しにいく）
-        v_color = _tier_pick(REACH_COLOR_TIERS, False, denom)
-        v_line = _tier_pick(REACH_LINE_TIERS, False, denom)
-    elif hit or not rush:
+    # 昇格演出: 通常時の奇数当選の一部は「偶数揃い→ぷちゅん→奇数」で見せる
+    upgrade = (not rush) and hit and not is_777 and final[0] % 2 == 1 \
+        and random.random() < UPGRADE_P
+    if hit or not rush:
         v_color = _tier_pick(REACH_COLOR_TIERS, hit, denom)
         v_line = _tier_pick(REACH_LINE_TIERS, hit, denom)
     else:
@@ -862,8 +863,7 @@ def land_spin(pane):
                               ("mure", .15), ("logo", .20)],
                              [(None, .93), ("step", .05), ("count", .015),
                               ("mure", .0006), ("logo", .0015)])
-        teased_disp = True if revive else teased
-        if ann == "count" and not teased_disp:
+        if ann == "count" and not teased:
             ann = None  # カウントダウンはリーチ発展確定の予告
         step_level = 0
         if ann == "step":
@@ -874,16 +874,15 @@ def land_spin(pane):
             play_announcement(pane, stats, ann, step_level)
         # ---- 停止フェーズ ----
         disp = final
-        if revive:
-            d = final[0]
-            e = random.choice([x for x in range(10) if x != d])
-            disp = [d, d, e]  # 一旦リーチハズレの目で止めて見せる
+        if upgrade:
+            e = random.choice([0, 2, 4, 6, 8])
+            disp = [e, e, e]  # 一旦偶数揃いで止めて見せる（300ぼーなすを装う）
         if pattern == "hasami":
             lock_at = [4, 15, 2]   # ハサミ押し: 右→左→中央
         elif pattern == "reverse":
             lock_at = [15, 4, 2]   # 逆押し: 右→中央→左
         else:
-            lock_at = [2, 4, 15 if teased_disp else 6]
+            lock_at = [2, 4, 15 if teased else 6]
         line_text = v_line if v_line else random.choice(REACH_LINE_FILLERS)
         flowed = False
         f = 0
@@ -920,11 +919,9 @@ def land_spin(pane):
                    marquee_off=(pattern == "blackout" and in_tease))
             time.sleep(delay)
             f += 1
-        if revive:
-            # 一回死んだフリ → 暗転 → 「まだだにぇ！」で本当の出目に蘇る
-            render(pane, disp, "（´・ω・｀）", "ざんねん…", stats, scr3="つぎいくにぇ")
-            time.sleep(1.3)
-            revival_twist(pane, final, stats)
+        if upgrade:
+            # 偶数で喜ばせかけて → ぷちゅん → 奇数昇格でRUSH突入
+            upgrade_reveal(pane, disp, final, stats)
     stats["spins"] += 1
     if hit:
         stats["hits"] += 1
