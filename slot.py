@@ -202,11 +202,12 @@ def stats_read():
     today = pachi_day()
     if stats.get("day") != today:
         # 開店リセット: 回転数・揃い数・出玉・RUSHは毎日 JST 10:00 にゼロから
-        stats = {"spins": 0, "hits": 0, "balls": 0, "rush": False,
+        stats = {"spins": 0, "hits": 0, "balls": 0, "rush": False, "rush_streak": 0,
                  "last": stats.get("last", [7, 7, 7]), "day": today}
         stats_write(stats)
     stats.setdefault("balls", 0)
     stats.setdefault("rush", False)
+    stats.setdefault("rush_streak", 0)
     return stats
 
 
@@ -289,47 +290,46 @@ def report_tokens(pane, ops):
         herdr_cli("pane", "report-metadata", pane, "--source", SOURCE, *args)
 
 
-# 前フレームでどの色トークン/玉数を使ったか（差分更新用）
-_prev = {"s1": None, "s2": None, "rl": None, "balls": None}
+# 前フレームでどの色トークンを使ったか（差分更新用）
+_prev = {"s1": None, "s2": None, "s3": None, "rl": None}
 
 
 def paint_statics(pane):
     """固定枠の描画 + 全色バリアントの掃除（起動/メンテ時に1回）。"""
-    ops = [("t", "s_top", C_TOP), ("t", "s_sep1", C_SEP1), ("t", "s_sep2", C_SEP2),
+    ops = [("t", "s_top", C_TOP), ("t", "s_sep1", C_SEP1),
            ("t", "s_sep3", C_SEP2), ("t", "s_rl_t", REEL_TOP), ("t", "s_rl_b", REEL_BOT),
            ("t", "s_bot", C_BOT),
-           ("c", "s_gap")]  # 旧レイアウトのレバー行トークンを掃除
-    for name in ("s1", "s2"):
+           ("c", "s_gap"), ("c", "s_sep2")]  # 旧レイアウトのトークンを掃除
+    for name in ("s1", "s2", "s3"):
         ops += [("c", f"{name}_{ck}") for ck in SCR_PALETTE]
     ops += [("c", f"rl_{ck}") for ck in PALETTE]
     report_tokens(pane, ops)
-    _prev["s1"] = _prev["s2"] = _prev["rl"] = _prev["balls"] = None
+    _prev["s1"] = _prev["s2"] = _prev["s3"] = _prev["rl"] = None
 
 
 def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="rest",
-           reel_col=None, scr_col="w", blank=False, extra_ops=None):
+           reel_col=None, scr_col="w", blank=False, scr3="", extra_ops=None):
     """reel_col: リール行の色キー（省略時は偶奇多数決）。
-    scr_col: モニター2行の色キー。色はトークンの出し分けで実現する。
+    scr_col: モニター3行(scr1/scr2/scr3)の色キー。色はトークンの出し分けで実現する。
     blank=True でリール暗転（ぷちゅん演出用）。extra_ops は追加トークン操作。"""
     if reel_col is None:
         reel_col = row_color(reels)
-    marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
+    # 統計行は「N揃い/M回転」と「出玉 N玉」を2秒ごとに切り替える
+    if int(time.time() // 2) % 2:
+        marquee = f"出玉 {stats.get('balls', 0)}玉"
+    else:
+        marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
     ops = [("t", "s_marq", boxed(marquee)),
            ("t", "s_btn", button_row(locked, lever)),
            ("t", "s_tray", tray_row(stats.get("balls", 0)))]
-    # 玉数はタイトル（display_agent）側に出す。変わったときだけ更新
-    balls = stats.get("balls", 0)
-    if _prev["balls"] != balls:
-        herdr_cli("pane", "report-metadata", pane, "--source", SOURCE,
-                  "--display-agent", f"{AGENT_DISPLAY} {balls}玉")
-        _prev["balls"] = balls
-    # モニター2行 + リール行: 使う色に値を入れ、色が変わったときだけ旧色をクリア
+    # モニター3行 + リール行: 使う色に値を入れ、色が変わったときだけ旧色をクリア
     if blank:
         reel_text = boxed("")  # リールだけ暗転。モニターは渡された内容をそのまま出す
     else:
         reel_text = boxed(" ".join(f"│{FW_DIGITS[d]}│" for d in reels))
     for name, text, col in (("s1", boxed(scr1), scr_col),
                             ("s2", boxed(scr2), scr_col),
+                            ("s3", boxed(scr3), scr_col),
                             ("rl", reel_text, reel_col)):
         if _prev[name] is not None and _prev[name] != col:
             ops.append(("c", f"{name}_{_prev[name]}"))
@@ -353,7 +353,7 @@ def setup_block(workspaces=None):
         herdr_cli("pane", "report-agent", pane, "--source", SOURCE,
                   "--agent", AGENT_ID, "--state", "idle")
         herdr_cli("pane", "report-metadata", pane, "--source", SOURCE,
-                  "--display-agent", f"{AGENT_DISPLAY} {stats_read().get('balls', 0)}玉")
+                  "--display-agent", AGENT_DISPLAY)
         paint_statics(pane)
     return pane
 
@@ -479,7 +479,8 @@ def celebrate(pane, final, stats):
         # 虹演出: リールとモニターの色を毎フレームずらしながらサイクルさせる
         for f, (s1, s2) in enumerate(seq):
             render(pane, final, s1, s2, stats,
-                   reel_col=RAINBOW_CYCLE[f % 5], scr_col=RAINBOW_CYCLE[(f + 2) % 5])
+                   reel_col=RAINBOW_CYCLE[f % 5], scr_col=RAINBOW_CYCLE[(f + 2) % 5],
+                   scr3=["☆　★　☆　★", "★　☆　★　☆"][f % 2])
             time.sleep(0.35)
     else:
         seq = random.choice([
@@ -498,8 +499,9 @@ def celebrate(pane, final, stats):
             ],
         ] * 2)
         cols, sc = triple_colors(final[0])
-        for s1, s2 in seq:
-            render(pane, final, s1, s2, stats, reel_col=cols, scr_col=sc)
+        for f, (s1, s2) in enumerate(seq):
+            render(pane, final, s1, s2, stats, reel_col=cols, scr_col=sc,
+                   scr3=["＊　＊　＊　＊", "　＊　＊　＊　"][f % 2])
             time.sleep(0.35)
     # 最後の静止画は描かない: ここから先は ambient_frame が RUSH/FEVER/ぼーなす表示で回し続ける
 
@@ -513,7 +515,9 @@ def lever_pull(pane, stats):
 def spin_frame(pane, stats, f):
     """回答待ちのあいだ回り続けるフレーム（ゆっくりめ）。"""
     cur = [random.randint(0, 9) for _ in range(3)]
-    render(pane, cur, "かんがえ中…", SPIN_WAVE[f % len(SPIN_WAVE)], stats, [False] * 3)
+    s3 = "ＲＵＳＨ中４／５" if stats.get("rush") else SPIN_WAVE[(f + 2) % len(SPIN_WAVE)]
+    render(pane, cur, "かんがえ中…", SPIN_WAVE[f % len(SPIN_WAVE)], stats, [False] * 3,
+           scr3=s3)
 
 
 def fever_write(stage, final):
@@ -545,13 +549,10 @@ PUCHUN_FRAMES = [
 
 
 def puchun(pane, decoy, stats):
-    """ぷちゅん演出: リール暗転＋モニター〜仕切り線の3行をブラウン管に見立て、
-    中央の行(scr2)に向かって画面が収縮して消える。終わったら仕切り線を戻す。"""
+    """ぷちゅん演出: リール暗転＋3行モニターの中央(scr2)に画面が収縮して消える。"""
     for s1, s2, s3, dur in PUCHUN_FRAMES:
-        render(pane, decoy, s1, s2, stats, blank=True, scr_col="w",
-               extra_ops=[("t", "s_sep2", boxed(s3))])
+        render(pane, decoy, s1, s2, stats, blank=True, scr_col="w", scr3=s3)
         time.sleep(dur)
-    report_tokens(pane, [("t", "s_sep2", C_SEP2)])  # 仕切り線を復元
 
 
 def promote_sequence(pane, decoy, stats):
@@ -563,10 +564,12 @@ def promote_sequence(pane, decoy, stats):
     # ぷちゅん（昇格では777.mp3は鳴らさない。音は直777の1%だけの特権）
     puchun(pane, decoy, stats)
     final = [7, 7, 7]
+    streak = stats.get("rush_streak", 0)
     for f in range(6):
         render(pane, final, ["＼昇格！！／", "★７７７★"][f % 2],
-               ["＋１５００玉", "☆☆☆☆☆"][f % 2], stats,
-               reel_col="y", scr_col=["y", "r"][f % 2])
+               [f"{streak}連目！！", f"{streak}連目！！"][f % 2], stats,
+               reel_col="y", scr_col=["y", "r"][f % 2],
+               scr3=["＋１５００玉", "☆☆☆☆☆"][f % 2])
         time.sleep(0.35)
 
 
@@ -608,15 +611,17 @@ def land_spin(pane):
     stats["spins"] += 1
     if hit:
         stats["hits"] += 1
-    # ---- 結果の反映（出玉・RUSH状態） ----
+    # ---- 結果の反映（出玉・RUSH状態・連チャン数） ----
     if rush:
         if promote:
             stats["balls"] = stats.get("balls", 0) + PAY_RUSH
+            stats["rush_streak"] = stats.get("rush_streak", 0) + 1
             stats["last"] = [7, 7, 7]
             stats_write(stats)
             promote_sequence(pane, final, stats)
         elif is_777:
             stats["balls"] = stats.get("balls", 0) + PAY_RUSH777
+            stats["rush_streak"] = stats.get("rush_streak", 0) + 1
             stats["last"] = final
             stats_write(stats)
             fever_write("win", final)
@@ -624,10 +629,13 @@ def land_spin(pane):
             celebrate(pane, final, stats)
         else:
             # 1/5 を引いた: RUSH終了
+            ended = stats.get("rush_streak", 0)
             stats["rush"] = False
+            stats["rush_streak"] = 0
             stats["last"] = final
             stats_write(stats)
-            render(pane, final, "ＲＵＳＨ終了…", "おつかれにぇ", stats)
+            render(pane, final, "ＲＵＳＨ終了…", f"{ended}連でした", stats,
+                   scr3="おつかれにぇ")
             time.sleep(2.0)
     else:
         if hit:
@@ -635,9 +643,11 @@ def land_spin(pane):
             if d == 7:
                 stats["balls"] = stats.get("balls", 0) + PAY_777
                 stats["rush"] = True
+                stats["rush_streak"] = 1
             elif d % 2 == 1:
                 stats["balls"] = stats.get("balls", 0) + PAY_ODD
                 stats["rush"] = True
+                stats["rush_streak"] = 1
             else:
                 stats["balls"] = stats.get("balls", 0) + PAY_EVEN
             stats["last"] = final
@@ -663,32 +673,37 @@ def ambient_frame(pane, stats, f):
     last = stats.get("last", [7, 7, 7])
     hit = last[0] == last[1] == last[2]
     if stats.get("rush"):
-        # RUSH継続中: 次のスピンまで赤黄でギラつかせる
+        # RUSH継続中: 真ん中に連チャン数、次のスピンまで赤黄でギラつかせる
         d3 = FW_DIGITS[last[0]] * 3 if hit else "７７７"
-        s1 = ["＊ＲＵＳＨ中＊", "≫ＲＵＳＨ中≪"][f % 2]
-        s2 = [f"＼{d3}／", "当選率４／５"][(f // 2) % 2]
+        streak = stats.get("rush_streak", 0)
+        s1 = ["ＲＵＳＨ継続中", "≫ＲＵＳＨ中≪"][f % 2]
+        s2 = f"{streak}連目"
+        s3 = [f"＼{d3}／", "当選率４／５"][(f // 2) % 2]
         render(pane, last, s1, s2, stats, reel_col="y" if last[0] == 7 else "r",
-               scr_col=["r", "y"][f % 2])
+               scr_col=["r", "y"][f % 2], scr3=s3)
         return
     if hit:
         d = last[0]
         d3 = FW_DIGITS[d] * 3
         s2 = [f"＼{d3}／", f"＊{d3}＊"][f % 2]
+        s3 = ["やったにぇ！", SPIN_WAVE[f % len(SPIN_WAVE)]][(f // 2) % 2]
         if d == 7:
             # 3000 FEVER: 虹サイクルで文字もリールも回り続ける
             render(pane, last, "3000 FEVER", s2, stats,
-                   reel_col=RAINBOW_CYCLE[f % 5], scr_col=RAINBOW_CYCLE[(f + 2) % 5])
+                   reel_col=RAINBOW_CYCLE[f % 5], scr_col=RAINBOW_CYCLE[(f + 2) % 5],
+                   scr3="エリート！！")
         elif d % 2 == 1:
             # 1500 RUSH: 赤⇔黄でギラギラ点滅
             render(pane, last, "1500 RUSH突入！", s2, stats,
-                   reel_col="r", scr_col=["r", "y"][f % 2])
+                   reel_col="r", scr_col=["r", "y"][f % 2], scr3=s3)
         else:
             # 300ぼーなす: 青⇔水色でゆらゆら
             render(pane, last, "300ぼーなすにゃ", s2, stats,
-                   reel_col="b", scr_col=["b", "c"][f % 2])
+                   reel_col="b", scr_col=["b", "c"][f % 2], scr3=s3)
     else:
         s2 = ["めざせ７７７", SPIN_WAVE[f % len(SPIN_WAVE)]][f % 2]
-        render(pane, last, "＊くろスロ＊", s2, stats)
+        s3 = ["１回転＝１送信", "回せば当たる…"][(f // 3) % 2]
+        render(pane, last, "＊くろスロ＊", s2, stats, scr3=s3)
 
 
 def idle_paint(pane):
