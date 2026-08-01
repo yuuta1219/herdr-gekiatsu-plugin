@@ -594,15 +594,16 @@ def zenkaiten_sequence(pane, stats):
         time.sleep(delay)
     # リーチ中にまさかのぷちゅん
     puchun(pane, [7, 7, 7], stats)
-    # 復帰: 「中央に注目！」虹点滅（リールはまだ暗転）
+    # 復帰: 上下に「おめでとう」「全回転」、中央に「注目！」の3段虹点滅（リールはまだ暗転）
     for f in range(3):
-        render(pane, [0, 0, 0], "", "中央に注目！", stats, [False] * 3, blank=True,
-               scr_col=RAINBOW_CYCLE[f % 5])
+        render(pane, [0, 0, 0], "おめでとう", "中央に注目！", stats, [False] * 3, blank=True,
+               scr_col=RAINBOW_CYCLE[f % 5], scr3="＊全回転＊")
         time.sleep(0.45)
     # 全回転: 111 から揃ったまま昇順で流れる
     for i, d in enumerate([1, 2, 3, 4, 5, 6]):
-        render(pane, [d, d, d], "", "中央に注目！", stats, [False] * 3,
-               reel_col=RAINBOW_CYCLE[i % 5], scr_col=RAINBOW_CYCLE[(i + 2) % 5])
+        render(pane, [d, d, d], "おめでとう", "中央に注目！", stats, [False] * 3,
+               reel_col=RAINBOW_CYCLE[i % 5], scr_col=RAINBOW_CYCLE[(i + 2) % 5],
+               scr3="＊全回転＊")
         time.sleep(0.6)
     # 777着地: 「おめでとう」→ 0.2秒後にポップアップ召喚（音も揃った瞬間）
     play_777_sound()
