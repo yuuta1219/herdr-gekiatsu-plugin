@@ -599,15 +599,19 @@ def zenkaiten_sequence(pane, stats):
         render(pane, [0, 0, 0], "", "中央に注目！", stats, [False] * 3, blank=True,
                scr_col=RAINBOW_CYCLE[f % 5])
         time.sleep(0.45)
-    # 全回転: 111 から揃ったまま昇順で流れる。222 でポップアップ召喚
-    for i, d in enumerate([1, 2, 3, 4, 5, 6, 7]):
-        if d == 2:
-            fever_write("reach", [7, 7, 7])
-            herdr_cli("plugin", "pane", "open",
-                      "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
+    # 全回転: 111 から揃ったまま昇順で流れる
+    for i, d in enumerate([1, 2, 3, 4, 5, 6]):
         render(pane, [d, d, d], "", "中央に注目！", stats, [False] * 3,
                reel_col=RAINBOW_CYCLE[i % 5], scr_col=RAINBOW_CYCLE[(i + 2) % 5])
         time.sleep(0.6)
+    # 777着地: 「おめでとう」→ 0.2秒後にポップアップ召喚（音も揃った瞬間）
+    play_777_sound()
+    render(pane, [7, 7, 7], "＼おめでとう／", "★７７７★", stats,
+           reel_col="y", scr_col="y", scr3="全回転でした")
+    time.sleep(0.2)
+    fever_write("win", [7, 7, 7])  # win状態で開く=ポップアップは即・虹色王冠
+    herdr_cli("plugin", "pane", "open",
+              "--plugin", PLUGIN_ID, "--entrypoint", "fever", "--no-focus")
 
 
 def land_spin(pane):
@@ -668,12 +672,11 @@ def land_spin(pane):
             stats_write(stats)
             promote_sequence(pane, final, stats)
         elif is_777:
+            # 音とポップアップは zenkaiten_sequence 側で処理済み
             stats["balls"] = stats.get("balls", 0) + PAY_RUSH777
             stats["rush_streak"] = stats.get("rush_streak", 0) + 1
             stats["last"] = final
             stats_write(stats)
-            fever_write("win", final)
-            play_777_sound()
             celebrate(pane, final, stats)
         else:
             # 1/5 を引いた: RUSH終了
@@ -700,9 +703,7 @@ def land_spin(pane):
                 stats["balls"] = stats.get("balls", 0) + PAY_EVEN
             stats["last"] = final
             stats_write(stats)
-            if is_777:
-                fever_write("win", final)
-                play_777_sound()
+            # 777の音とポップアップは zenkaiten_sequence 側で処理済み
             celebrate(pane, final, stats)
         elif reach:
             stats["last"] = final
