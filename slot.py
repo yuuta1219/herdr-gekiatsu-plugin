@@ -434,28 +434,65 @@ def miss_reels():
     return [a, b, random.randint(0, 9)]
 
 
-def pick_outcome(rush=False):
+# リーチ演出の振り分け:
+#   blackout = 消灯予告（統計行が消える） / hasami = ハサミ押し（右→左→中央）
+#   reverse  = 逆押し（右→中央→左） / zenkaiten = 全回転（777専用）
+# 当たり時は特殊3種に各30%（通常リーチ当たり10%）。ハズレ側は信頼度が
+# ちょうど50%になる量だけ特殊リーチを混ぜる（q = 0.3/(分母-1)）。
+# → 特殊演出の信頼度は確率変動(使用率連動)後もつねに約50%を維持する
+HIT_PATTERNS = ["normal", "blackout", "hasami", "reverse"]
+HIT_PATTERN_W = [0.10, 0.30, 0.30, 0.30]
+
+
+def _miss_shape(pattern):
+    """特殊リーチ用のハズレ出目: 先に止まる2つが揃って見える形にする。"""
+    d = random.randint(0, 9)
+    e = random.choice([x for x in range(10) if x != d])
+    if pattern == "hasami":    # 右→左が先: 左右が同じ
+        return [d, e, d]
+    if pattern == "reverse":   # 右→中央が先: 中右が同じ
+        return [e, d, d]
+    return [d, d, e]           # blackout: 通常順で左2つが同じ
+
+
+def _hit_digit():
+    r = random.random()
+    if r < P_777:
+        return 7
+    if r < P_777 + P_ODD:
+        return random.choice([1, 3, 5, 9])
+    return random.choice([0, 2, 4, 6, 8])
+
+
+def decide(rush=False):
+    """出目と演出パターンをまとめて抽選する。returns (final, pattern)"""
     forced = consume_force()
     if forced is not None:
-        return forced
+        if forced == [7, 7, 7]:
+            return forced, "zenkaiten"
+        if forced[0] == forced[1] == forced[2]:
+            return forced, random.choices(HIT_PATTERNS, HIT_PATTERN_W)[0]
+        return forced, "normal"
     if rush:
-        # RUSH中: 4/5で当選。当選の1%は最初から777（+3000）、99%は昇格演出用の別揃い
         if random.random() < RUSH_WIN_P:
             if random.random() < RUSH_DIRECT777_P:
-                return [7, 7, 7]
+                return [7, 7, 7], "zenkaiten"
             d = random.choice([0, 1, 2, 3, 4, 5, 6, 8, 9])
-            return [d, d, d]
-        return miss_reels()
-    if random.random() < 1 / jackpot_denom(session_pct()):
-        r = random.random()
-        if r < P_777:
-            d = 7
-        elif r < P_777 + P_ODD:
-            d = random.choice([1, 3, 5, 9])
-        else:
-            d = random.choice([0, 2, 4, 6, 8])
-        return [d, d, d]
-    return miss_reels()
+            return [d, d, d], random.choice(HIT_PATTERNS)
+        return miss_reels(), "normal"
+    denom = jackpot_denom(session_pct())
+    if random.random() < 1 / denom:
+        d = _hit_digit()
+        if d == 7:
+            return [7, 7, 7], "zenkaiten"
+        return [d, d, d], random.choices(HIT_PATTERNS, HIT_PATTERN_W)[0]
+    # ハズレ側の特殊リーチ: 各 q で発生（信頼度50%になる調整量）
+    q = 0.3 / max(1, denom - 1)
+    r = random.random()
+    for i, pattern in enumerate(("blackout", "hasami", "reverse")):
+        if r < (i + 1) * q:
+            return _miss_shape(pattern), pattern
+    return miss_reels(), "normal"
 
 
 SPIN_WAVE = ["≫　　　　", "　≫　　　", "　　≫　　", "　　　≫　", "　　　　≫"]
@@ -619,34 +656,30 @@ def land_spin(pane):
     """回答完了（=ユーザー待ち）の瞬間に呼ばれて、リールを順に止める。"""
     stats = stats_read()
     rush = bool(stats.get("rush"))
-    final = pick_outcome(rush)
-    reach = final[0] == final[1]
+    final, pattern = decide(rush)
     hit = final[0] == final[1] == final[2]
     is_777 = final == [7, 7, 7]
     promote = rush and hit and not is_777  # RUSHの昇格演出（最終的に777表示になる）
-    # リーチ当たりの演出分岐: 777=全回転固定、他の当たりは1/3ずつで
-    # 通常 / 消灯予告(統計行が消える) / 逆押し予告(右→左→中央で停止)
-    if is_777:
-        pattern = "zenkaiten"
-    elif hit:
-        pattern = random.choice(["normal", "blackout", "reverse"])
-    else:
-        pattern = "normal"
+    # リーチした（先に止まる2つが揃って見えた）かどうか。おしい判定にも使う
+    teased = hit or pattern in ("blackout", "hasami", "reverse") or final[0] == final[1]
     if pattern == "zenkaiten":
-        # ポップアップは全回転シーケンス内(222のタイミング)で開く
+        # 音とポップアップは全回転シーケンス内で処理される
         zenkaiten_sequence(pane, stats)
     else:
         # 0.25s/フレーム × 2フレーム間隔 = ボタンは0.5秒ずつ順に止まる
-        if pattern == "reverse":
-            lock_at = [4, 10, 2]  # 右→左→中央（中央が最後=ハサミリーチ）
+        if pattern == "hasami":
+            lock_at = [4, 10, 2]   # ハサミ押し: 右→左→中央
+        elif pattern == "reverse":
+            lock_at = [10, 4, 2]   # 逆押し: 右→中央→左
         else:
-            lock_at = [2, 4, 10 if reach else 6]
+            lock_at = [2, 4, 10 if teased else 6]
         f = 0
         while f <= max(lock_at):
             locked = [f >= lock_at[i] for i in range(3)]
             cur = [final[i] if locked[i] else random.randint(0, 9) for i in range(3)]
-            # 残り1リールが回っていて、揃う目が生きている間はリーチ演出
-            in_tease = locked.count(False) == 1 and reach
+            # 残り1リールで、止まっている2つが同じ数字ならリーチ演出
+            shown = [final[i] for i in range(3) if locked[i]]
+            in_tease = locked.count(False) == 1 and len(shown) == 2 and shown[0] == shown[1]
             if in_tease:
                 s1 = REACH_S1[f % len(REACH_S1)]
                 s2 = REACH_S2[(f // 2) % len(REACH_S2)]
@@ -706,7 +739,7 @@ def land_spin(pane):
             stats_write(stats)
             # 777の音とポップアップは zenkaiten_sequence 側で処理済み
             celebrate(pane, final, stats)
-        elif reach:
+        elif teased:
             stats["last"] = final
             stats_write(stats)
             render(pane, final, "（＞＿＜）", "おしい…！！", stats, scr3="つぎこそにぇ")
