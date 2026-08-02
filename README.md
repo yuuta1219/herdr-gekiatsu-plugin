@@ -128,7 +128,8 @@ herdr plugin action invoke stop --plugin gekiatsu.claude-slot
 
 
 ## 機種情報
-<img width="941" height="1672" alt="ChatGPT Image 2026年8月2日 19_04_06" src="https://github.com/user-attachments/assets/3149f776-06e3-429a-9669-a2a701ab4a68" />
+<img width="941" height="1672" alt="ChatGPT Image 2026年8月2日 19_08_04" src="https://github.com/user-attachments/assets/9c491352-98cf-430e-a9d9-4725167237b1" />
+
 
 | 項目 | 内容 |
 |---|---|
@@ -173,7 +174,7 @@ herdr plugin action invoke stop --plugin gekiatsu.claude-slot
                   └─ 20%: RUSH終了 → 通常時へ
 ```
 
-## 解析情報（極秘）🤫
+## 解析情報
 
 > ※攻略誌からの流出データ。数値はモンテカルロ実測（30〜50万回転）に基づく。
 
