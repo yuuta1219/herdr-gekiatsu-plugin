@@ -907,34 +907,41 @@ def land_spin(pane):
         # ---- 予告フェーズ: 擬似連 → 回転中予告（どちらも占有率で信頼度が生まれる） ----
         pseudo_n = _w_choice(hit, [(0, .55), (1, .20), (2, .15), (3, .10)],
                                   [(0, .96), (1, .03), (2, .009), (3, .001)])
-        ann = _w_choice(hit, [(None, .25), ("step", .25), ("count", .15),
-                              ("mure", .15), ("logo", .20)],
-                             [(None, .93), ("step", .05), ("count", .015),
-                              ("mure", .0006), ("logo", .0015)])
-        if ann == "count" and not teased:
-            ann = None  # カウントダウンはリーチ発展確定の予告
+        # 回転開始時の予告はそれぞれ独立に抽選。発生した分は
+        # 「弱い(低信頼度)→強い(高信頼度)」の順に連続再生して盛り上げる
+        ANN_TABLE = [  # (名前, 当たり時確率, ハズレ時確率) 信頼度の弱い順
+            ("step", .25, .05),
+            ("count", .15, .015),
+            ("logo", .20, .0015),
+            ("mure", .15, .0006),
+        ]
+        anns = [name for name, ph, pm in ANN_TABLE
+                if random.random() < (ph if hit else pm)]
+        if "count" in anns and not teased:
+            anns.remove("count")  # カウントダウンはリーチ発展確定の予告
         step_level = 0
-        if ann == "step":
+        if "step" in anns:
             step_level = _w_choice(hit, [(2, .4), (3, .6)], [(1, .7), (2, .25), (3, .05)])
         # 複合は最大3演出まで（過剰スタック防止）。対象は時間を食う演出のみ:
         # 停止順パターン > 昇格 > 擬似連 > 予告 の優先度で枠を埋める。
+        # 予告同士の枠取りは強い(レアな)ものを優先して残す。
         # 色・セリフ示唆は時間コストゼロ（リーチ行に同居）なのでキャップ対象外
-        # （キャップに含めると当たり側だけ没収されて信頼度が歪むため）
         slots = int(pattern != "normal") + int(upgrade)
         if pseudo_n:
             if slots < 3:
                 slots += 1
             else:
                 pseudo_n = 0
-        if ann:
+        keep = []
+        for name in reversed(anns):  # 強い順に枠を確保
             if slots < 3:
+                keep.append(name)
                 slots += 1
-            else:
-                ann = None
+        anns = [a for a in anns if a in keep]  # 再生は弱い順のまま
         if pseudo_n:
             pseudo_rounds(pane, stats, pseudo_n)
-        if ann:
-            play_announcement(pane, stats, ann, step_level)
+        for a in anns:
+            play_announcement(pane, stats, a, step_level)
         # ---- 停止フェーズ ----
         disp = final
         if upgrade:
