@@ -1199,6 +1199,7 @@ def cmd_daemon():
     active = set()  # いま回答生成中の claude ペイン
     f = 0   # スピンフレーム
     af = 0  # アンビエントフレーム
+    just_landed = False  # 直前に着地演出を終えたか（保留消化の儀式判定用）
     last_maint = time.time()
     while os.path.exists(SOCKET_PATH):
         try:
@@ -1217,8 +1218,19 @@ def cmd_daemon():
             st = stats_read()
             q = st.get("held") or []
             if q:
+                if just_landed:
+                    # 保留消化の儀式: 保留画面を見せてからガコッと回す
+                    # （どの保留を消化しているのか分かるように）
+                    lamps, hot = hold_lamps(st)
+                    for k in range(2):
+                        render(pane, st.get("last", [7, 7, 7]),
+                               ["保留消化！", "＞保留消化＜"][k % 2], lamps or "", st,
+                               scr_col=("y", "p" if hot else "w", "w"), scr3="次の玉いくにぇ")
+                        time.sleep(0.7)
+                    lever_pull(pane, st)
                 # 保留がある限り自動で次が回る（現実と同じ）
                 land_spin(pane)
+                just_landed = True
                 # まだ保留が残っていれば、結果画面を3秒見せてから次を回す
                 st2 = stats_read()
                 if st2.get("held"):
@@ -1229,10 +1241,12 @@ def cmd_daemon():
             elif active:
                 spin_frame(pane, st, f)
                 f += 1
+                just_landed = False
             else:
                 # 待機中も次のスピンまで演出を回し続ける
                 ambient_frame(pane, st, af)
                 af += 1
+                just_landed = False
         if time.time() - last_maint > MAINT_INTERVAL_S:
             try:
                 pane = setup_block()  # paint_statics 後も次のフレームですぐ再描画される
