@@ -916,6 +916,29 @@ def land_spin(pane):
         step_level = 0
         if ann == "step":
             step_level = _w_choice(hit, [(2, .4), (3, .6)], [(1, .7), (2, .25), (3, .05)])
+        # 複合は最大3演出まで（過剰スタック防止）。優先度:
+        # 停止順パターン > 昇格 > 擬似連 > 予告 > セリフ > 色 の順に枠を埋める
+        slots = int(pattern != "normal") + int(upgrade)
+        if pseudo_n:
+            if slots < 3:
+                slots += 1
+            else:
+                pseudo_n = 0
+        if ann:
+            if slots < 3:
+                slots += 1
+            else:
+                ann = None
+        if v_line:
+            if slots < 3:
+                slots += 1
+            else:
+                v_line = None
+        if v_color:
+            if slots < 3:
+                slots += 1
+            else:
+                v_color = None
         if pseudo_n:
             pseudo_rounds(pane, stats, pseudo_n)
         if ann:
