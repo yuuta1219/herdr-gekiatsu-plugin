@@ -52,7 +52,7 @@ PAY_ODD = 300
 PAY_777 = 600
 PAY_RUSH = 300
 PAY_RUSH777 = 600
-COIN_UNIT = 5000    # 受け皿の🪙1枚あたりの出玉(枚)。20スロ換算で貯まる速度は旧仕様の1/5
+TRAY_FULL = 10000   # 出玉1万枚で受け皿(🪙7枚)が満杯。旧仕様の5万発÷5と等価
 MAINT_INTERVAL_S = 60
 
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
@@ -351,9 +351,8 @@ def button_row(locked, lever):
 
 
 def tray_row(balls):
-    """筐体内の受け皿。5000玉ごとに🪙が1枚増える（幅15桁なので最大7枚=35,000玉で満杯）。
-    玉数の数字はタイトル（display_agent）側に出す。"""
-    return boxed("🪙" * min(7, balls // COIN_UNIT))
+    """筐体内の受け皿。出玉1万枚で🪙7枚の満杯（1枚 ≒ 1,429枚）。"""
+    return boxed("🪙" * min(7, balls * 7 // TRAY_FULL))
 
 
 def report_tokens(pane, ops):
