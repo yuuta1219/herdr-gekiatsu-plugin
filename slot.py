@@ -278,7 +278,9 @@ REACH_LINE_TIERS = [
 REACH_LINE_FILLERS = ["ドキドキ…", "くるかにぇ？", "むむむ…"]
 
 # ---- 予告演出（回転開始〜停止前に挟まる。占有率で信頼度が生まれる） ----
-UPGRADE_P = 0.25  # 通常時の奇数当選のうち「偶数揃い→ぷちゅん→奇数に昇格」演出になる割合
+# 偶数当たりの50%は本物の昇格（偶数→ぷちゅん→奇数化=RUSH突入・+300枚）。
+# これで RUSH突入率 = 奇数49% + 777 1% + 昇格25% = ちょうど75%
+EVEN_UPGRADE_P = 0.5
 
 
 def _w_choice(hit, hit_table, miss_table):
@@ -912,8 +914,12 @@ def land_spin(pane):
     # リーチ中の信頼度示唆（文字色とセリフ）を抽選。RUSHのハズレは無示唆で散る
     denom = jackpot_denom(session_pct())
     # 昇格演出: 通常時の奇数当選の一部は「偶数揃い→ぷちゅん→奇数」で見せる
-    upgrade = (not rush) and hit and not is_777 and final[0] % 2 == 1 \
-        and random.random() < UPGRADE_P
+    # 本物の昇格: 偶数当たりの50%は「偶数で止まる→ぷちゅん→奇数化」でRUSH突入
+    upgrade = (not rush) and hit and not is_777 and final[0] % 2 == 0 \
+        and random.random() < EVEN_UPGRADE_P
+    if upgrade:
+        decoy_even = final                      # 偶数のまま止まって見せる
+        final = [random.choice([1, 3, 5, 9])] * 3  # 本当の結果は昇格後の奇数
     if hit or not rush:
         v_color = _tier_pick(REACH_COLOR_TIERS, hit, denom)
         v_line = _tier_pick(REACH_LINE_TIERS, hit, denom)
@@ -965,10 +971,7 @@ def land_spin(pane):
         if teased and random.random() < (0.30 if hit else 0.03):
             lever_buru(pane, stats)
         # ---- 停止フェーズ ----
-        disp = final
-        if upgrade:
-            e = random.choice([0, 2, 4, 6, 8])
-            disp = [e, e, e]  # 一旦偶数揃いで止めて見せる（300ぼーなすを装う）
+        disp = decoy_even if upgrade else final  # 昇格時は引いた偶数の目で止める
         if pattern == "hasami":
             lock_at = [4, 15, 2]   # ハサミ押し: 右→左→中央
         elif pattern == "reverse":
