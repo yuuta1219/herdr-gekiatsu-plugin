@@ -46,13 +46,13 @@ P_ODD = 0.49        # 〃 奇数揃い(1,3,5,9) = 49%（残り50%が偶数揃い
 REACH_P = 0.10      # ハズレ時にリーチ（左2つ揃い）が発生する確率
 # RUSH: 奇数揃い or 777 の当選で突入。ハズレ(1/5)を引くまで継続
 RUSH_WIN_P = 0.8          # RUSH中の当選率 4/5
-RUSH_DIRECT777_P = 0.01   # RUSH当選の1%は最初から777（+3000玉）。残り99%は昇格演出（+1500玉）
-PAY_EVEN = 300
-PAY_ODD = 1500
-PAY_777 = 3000
-PAY_RUSH = 1500
-PAY_RUSH777 = 3000
-COIN_UNIT = 5000    # 出玉トレイのコイン1枚あたりの玉数（最大10枚=5万）
+RUSH_DIRECT777_P = 0.01   # RUSH当選の1%は最初から777（+600枚）。残り99%は昇格演出（+300枚）
+PAY_EVEN = 60
+PAY_ODD = 300
+PAY_777 = 600
+PAY_RUSH = 300
+PAY_RUSH777 = 600
+COIN_UNIT = 5000    # 受け皿の🪙1枚あたりの出玉(枚)。20スロ換算で貯まる速度は旧仕様の1/5
 MAINT_INTERVAL_S = 60
 
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
@@ -398,7 +398,7 @@ def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="res
     if marquee_off:
         marquee = ""  # 消灯予告: リーチ中にここが消えたら当たり確定
     elif int(time.time() // 2) % 2:
-        marquee = f"出玉 {stats.get('balls', 0)}玉"
+        marquee = f"出玉 {stats.get('balls', 0)}枚"
     else:
         marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
     ops = [("t", "s_marq", boxed(marquee)),
@@ -701,7 +701,7 @@ def puchun(pane, decoy, stats):
 
 
 def promote_sequence(pane, decoy, stats):
-    """RUSH当選(99%側)の演出: 別の揃い → ぷちゅん(暗転) → 777昇格 → +1500玉。"""
+    """RUSH当選(99%側)の演出: 別の揃い → ぷちゅん(暗転) → 777昇格 → +300枚。"""
     d3 = FW_DIGITS[decoy[0]] * 3
     cols, sc = triple_colors(decoy[0])
     render(pane, decoy, f"＼{d3}／", "そろった！？", stats, reel_col=cols, scr_col=sc)
@@ -714,7 +714,7 @@ def promote_sequence(pane, decoy, stats):
         render(pane, final, ["＼昇格！！／", "★７７７★"][f % 2],
                [f"{streak}連目！！", f"{streak}連目！！"][f % 2], stats,
                reel_col="y", scr_col=["y", "r"][f % 2],
-               scr3=["＋１５００玉", "☆☆☆☆☆"][f % 2])
+               scr3=["＋３００枚", "☆☆☆☆☆"][f % 2])
         time.sleep(0.35)
 
 
@@ -845,7 +845,7 @@ def reach_flow(pane, cur, locked, stats):
 def upgrade_reveal(pane, decoy, final, stats):
     """昇格演出: 偶数揃い(300ぼーなす?)→ぷちゅん→奇数揃いに変身してRUSH突入。"""
     d3e = FW_DIGITS[decoy[0]] * 3
-    render(pane, decoy, f"＼{d3e}／", "300ぼーなす？", stats,
+    render(pane, decoy, f"＼{d3e}／", "60ぼーなす？", stats,
            reel_col="b", scr_col="b", scr3="…かとおもいきや")
     time.sleep(1.3)
     puchun(pane, decoy, stats)
@@ -1040,17 +1040,17 @@ def ambient_frame(pane, stats, f):
         s2 = [f"＼{d3}／", f"＊{d3}＊"][f % 2]
         s3 = ["やったにぇ！", SPIN_WAVE[f % len(SPIN_WAVE)]][(f // 2) % 2]
         if d == 7:
-            # 3000 FEVER: 虹サイクルで文字もリールも回り続ける
-            render(pane, last, "3000 FEVER", s2, stats,
+            # 600 FEVER: 虹サイクルで文字もリールも回り続ける
+            render(pane, last, "600 FEVER", s2, stats,
                    reel_col=RAINBOW_CYCLE[f % 5], scr_col=RAINBOW_CYCLE[(f + 2) % 5],
                    scr3="エリート！！")
         elif d % 2 == 1:
-            # 1500 RUSH: 赤⇔黄でギラギラ点滅
-            render(pane, last, "1500 RUSH突入！", s2, stats,
+            # 300 RUSH: 赤⇔黄でギラギラ点滅
+            render(pane, last, "300 RUSH突入！", s2, stats,
                    reel_col="r", scr_col=["r", "y"][f % 2], scr3=s3)
         else:
             # 300ぼーなす: 青⇔水色でゆらゆら
-            render(pane, last, "300ぼーなすにゃ", s2, stats,
+            render(pane, last, "60ぼーなすにゃ", s2, stats,
                    reel_col="b", scr_col=["b", "c"][f % 2], scr3=s3)
     else:
         s2 = ["めざせ７７７", SPIN_WAVE[f % len(SPIN_WAVE)]][f % 2]
@@ -1232,8 +1232,8 @@ def load_art(path, fallback):
 
 def cmd_fever():
     """777確定演出ポップアップ（64x32セル）。reach 中は王冠がグレーでせり上がり、
-    win で虹色の王冠3000。win 表示から5秒で自動終了（手動でも閉じられる）。"""
-    art = ["  " + l for l in load_art(FEVER777_FILE, "3000 FEVER")]
+    win で虹色の王冠600。win 表示から5秒で自動終了（手動でも閉じられる）。"""
+    art = ["  " + l for l in load_art(FEVER777_FILE, "600 FEVER")]
     out = sys.stdout
     out.write("\033[?25l")  # カーソル隠す
     start = time.time()
@@ -1260,7 +1260,7 @@ def cmd_fever():
             out.flush()
             time.sleep(0.25)
             f += 1
-        # --- 大当りフェーズ: 虹色の王冠3000 ---
+        # --- 大当りフェーズ: 虹色の王冠600 ---
         t_win = time.time()
         f = 0
         while time.time() - t_win < 5:
@@ -1274,7 +1274,7 @@ def cmd_fever():
             tail_c = ANSI_RAINBOW[(f + 4) % len(ANSI_RAINBOW)]
             remain = 5 - int(time.time() - t_win)
             out.write(f"\033[1m\033[38;5;{tail_c}m{'　' * 7}"
-                      f"｜｜　３０００ ＦＥＶＥＲ　｜｜\033[0m")
+                      f"｜｜　６００ ＦＥＶＥＲ　｜｜\033[0m")
             out.write(f"\033[2m ({remain}s)\033[0m\n")
             out.flush()
             time.sleep(0.18)
