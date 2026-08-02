@@ -229,6 +229,7 @@ herdr plugin action invoke stop --plugin gekiatsu.claude-slot
 | ロゴ落下（激/ア/ツ 対角） | 58% |
 | **群予告（にぇの大群）** | **72%** |
 | 保留変化（●ランプ） | 45%（RUSH中はほぼ100%） |
+| レバブル（レバーが震える） | 約50%（リーチ発展は確定） |
 
 ### 覚え方
 

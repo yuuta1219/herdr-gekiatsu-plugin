@@ -648,6 +648,25 @@ def lever_pull(pane, stats):
     cur = [random.randint(0, 9) for _ in range(3)]
     render(pane, cur, "ガコッ！", "", stats, [False] * 3, lever="pulled")
     time.sleep(0.4)
+    # レバーが戻って一拍(0.5秒)おいてから回り出す
+    render(pane, cur, "ガコッ！", "", stats, [False] * 3, lever="rest")
+    time.sleep(0.5)
+
+
+def lever_buru(pane, stats):
+    """レバブル: リーチ前兆の激アツ演出。レバーが震え、筐体右側で
+    「ぶ/る」が縦に揺れる（信頼度約50%）。"""
+    for f in range(7):
+        cur = [random.randint(0, 9) for _ in range(3)]
+        a, b = ("ぶ", "る") if f % 2 else ("る", "ぶ")
+        jit = " " if f % 2 else ""
+        render(pane, cur, "！！？", "", stats, [False] * 3,
+               lever="pulled" if f % 2 else "rest",
+               extra_ops=[("t", "s_rl_t", REEL_TOP + jit + a),
+                          ("t", "s_rl_b", REEL_BOT + jit + b)])
+        time.sleep(0.18)
+    # 揺れ終わり: 枠を元に戻す
+    report_tokens(pane, [("t", "s_rl_t", REEL_TOP), ("t", "s_rl_b", REEL_BOT)])
 
 
 def spin_frame(pane, stats, f):
@@ -942,6 +961,9 @@ def land_spin(pane):
             pseudo_rounds(pane, stats, pseudo_n)
         for a in anns:
             play_announcement(pane, stats, a, step_level)
+        # レバブル: リーチになるスピンだけ発生しうる前兆（当たり30%/ハズレリーチ3%≒信頼度50%）
+        if teased and random.random() < (0.30 if hit else 0.03):
+            lever_buru(pane, stats)
         # ---- 停止フェーズ ----
         disp = final
         if upgrade:
