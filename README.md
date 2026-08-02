@@ -128,6 +128,7 @@ herdr plugin action invoke stop --plugin gekiatsu.claude-slot
 
 
 ## 機種情報
+<img width="941" height="1672" alt="ChatGPT Image 2026年8月2日 19_04_06" src="https://github.com/user-attachments/assets/3149f776-06e3-429a-9669-a2a701ab4a68" />
 
 | 項目 | 内容 |
 |---|---|
