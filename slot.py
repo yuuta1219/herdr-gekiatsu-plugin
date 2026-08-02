@@ -1175,6 +1175,13 @@ def cmd_daemon():
             if q:
                 # 保留がある限り自動で次が回る（現実と同じ）
                 land_spin(pane)
+                # まだ保留が残っていれば、結果画面を3秒見せてから次を回す
+                st2 = stats_read()
+                if st2.get("held"):
+                    for _ in range(4):
+                        ambient_frame(pane, st2, af)
+                        af += 1
+                        time.sleep(0.75)
             elif active:
                 spin_frame(pane, st, f)
                 f += 1
