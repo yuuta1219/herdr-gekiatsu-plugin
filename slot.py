@@ -760,9 +760,10 @@ def enqueue_hold():
     q = stats.get("held") or []
     if isinstance(q, dict):
         q = [q]
-    nf, np_ = decide_lottery(bool(stats.get("rush")))
+    mode_rush = bool(stats.get("rush"))
+    nf, np_ = decide_lottery(mode_rush)
     nh = nf[0] == nf[1] == nf[2]
-    q.append({"final": nf, "pattern": np_,
+    q.append({"final": nf, "pattern": np_, "mode_rush": mode_rush,
               "hint": (nh and random.random() < 0.4)
                       or ((not nh) and random.random() < 0.005)})
     stats["held"] = q
@@ -865,6 +866,8 @@ def land_spin(pane):
         held_q = [held_q]  # 旧形式(単一保留)からの移行
     forced = consume_force()
     if forced is not None:
+        if held_q:
+            held_q.pop(0)  # このスピン分の保留を仕込みで置き換える（幽霊保留の防止）
         if forced == [7, 7, 7]:
             final, pattern = forced, "zenkaiten"
         elif forced[0] == forced[1] == forced[2]:
@@ -873,7 +876,12 @@ def land_spin(pane):
             final, pattern = forced, "normal"
     elif held_q:
         entry = held_q.pop(0)
-        final, pattern = entry["final"], entry["pattern"]
+        if bool(entry.get("mode_rush", False)) != rush:
+            # 入賞時と消化時でモードが違う場合は現在の状態で判定し直す
+            # （通常時に積んだ保留もRUSH中に消化するなら80%で抽選＝本物と同じ）
+            final, pattern = decide_lottery(rush)
+        else:
+            final, pattern = entry["final"], entry["pattern"]
     else:
         final, pattern = decide_lottery(rush)
     stats["held"] = held_q
