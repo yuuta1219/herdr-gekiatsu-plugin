@@ -345,11 +345,21 @@ def row_color(digits):
 
 def button_row(locked, lever):
     """停止ボタン3つとレバーを1行に統合（右サイドにレバー）。
-    ボタンはリール（センタリング済み）の真下に来るよう同じ左マージンを付ける。"""
+    ボタンはリール（センタリング済み）の真下に来るよう同じ左マージンを付ける。
+    倒したレバーはアームがエルボーになり、玉は下段(sep3_row)にぶら下がる。"""
     reel_margin = (INNER - 14) // 2  # リール列(幅14)のセンタリング左余白と揃える
     cells = " " * reel_margin + " ".join(f" {'●' if l else '○'}  " for l in locked).rstrip()
     pad = max(0, INNER - dwidth(cells))
-    return "║" + cells + " " * pad + ("╠●" if lever == "pulled" else "╠══○")
+    return "║" + cells + " " * pad + ("╠══╗" if lever == "pulled" else "╠══○")
+
+
+def sep3_row(lever):
+    """リールと受け皿のあいだのセパレータ。レバーを倒しているあいだは
+    エルボー(╗)の真下=19桁目に玉を描き、支点から下がった状態を作る。"""
+    if lever != "pulled":
+        return C_SEP2
+    # C_SEP2 は ╢ が16桁目。17,18を空けて19桁目に玉を置くとエルボーの直下になる
+    return C_SEP2 + "  ○"
 
 
 def tray_row(balls):
@@ -404,6 +414,7 @@ def render(pane, reels, scr1, scr2, stats, locked=(True, True, True), lever="res
         marquee = f"{stats['hits']}揃い/{stats['spins']}回転"
     ops = [("t", "s_marq", boxed(marquee)),
            ("t", "s_btn", button_row(locked, lever)),
+           ("t", "s_sep3", sep3_row(lever)),
            ("t", "s_tray", tray_row(stats.get("balls", 0)))]
     # モニター3行 + リール行: 使う色に値を入れ、色が変わったときだけ旧色をクリア
     if blank:
